@@ -1,0 +1,66 @@
+[build-system]
+# requires = ["setuptools"]
+requires = ["uv_build >= 0.9.0","uv_build < 0.11"]
+build-backend = "uv_build"
+
+[project]
+name = "ezieView"
+version = "0.0.1"
+authors = [
+  { name = "Rafael Mesquita", email = "Rafael.Mesquita@jhuapl.edu" },
+  { name = "Brent Smith", email = "Brent.Smith@jhuapl.edu" },
+  { name = "Brian Wolven", email = "Brian.Wolven@jhuapl.edu" },
+]
+description = "Plotting routines for the EZIE Level 1, 2, and 3 data products"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click",
+  "requests",
+  "matplotlib",
+  "numpy",
+  "netCDF4",
+  "spiceypy",
+  "apexpy",
+  "cartopy",
+  "tkcalendar",
+]
+
+[tool.setuptools]
+    script-files = [ "make_ezie_images.sh" ]
+
+[tool.setuptools.package-data]
+"ezieview.binary-assets" = ["*.png"]
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Physics",
+  "Topic :: Scientific/Engineering :: Aurora",
+  "Topic :: Scientific/Engineering :: Ionosphere",
+]
+license = ["BSD 3-Clause"]
+license-files = ["LICENSE.md"]
+# maintainers = [
+#   { name = "Brian Wolven", email = "brian.wolven@jhuapl.edu" },
+# ]
+
+[project.urls]
+Source = "https://bitbucket.org/aplkaiju/glow/"
+
+# The following still TBD
+# Homepage = "https://bitbucket.org/aplkaiju/???/"
+# "Science Gateway" = "https://eziegw.jhuapl.edu"
+# Documentation = "https://ezieAsPy.readthedocs.io/"
+# "Bug Tracker" = "https://github.com/JHUAPL/ezieAsPy/issues"
+# Discussions = "https://github.com/JHUAPL/ezieAsPy/discussions"
+# Changelog = "https://ezieAsPy.readthedocs.io/en/latest/changelog.html"
+
+# [development-groups]
+# tests = ["pytest", "pytest-cov"]
+# docs = ["sphinx", "pydata-sphinx-theme"]
+# lint = ["ruff", "black"]

@@ -1,0 +1,2750 @@
+"""
+A collection of methods for generating plots from EZIE data products, primarily for use
+on the science gateway. A few methods are also used for various spacecraft attitude
+and/or data analyses, e.g., the star tracker loss of lock investigation.
+
+TODO: Refactor the various mapping methods used by multiple types of plot generation
+routines, both geodetic and magnetic, into a single set of modular methods (rather than
+the organic mess that grew out of shifting requirements over the last two years). Once
+that is done, the methods specific to a single type of plot should probably be moved to
+their respective update_*_plots.py files in their presumably slimmed down new forms.
+This file should contain only the methods common to all, and the gw_*.py routines are
+already used by both the gateway plotting codes and various analysis coes, e.g., for
+sci-ops investigations (star tracker loss of lock, etc.).
+"""
+
+# region imports
+import datetime
+import logging
+import time
+from pathlib import Path
+
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib as mpl
+import matplotlib.path as mpath
+import matplotlib.pyplot as plt
+import numpy as np
+import spiceypy
+from apexpy import Apex
+from cartopy.feature.nightshade import Nightshade
+from cartopy.mpl.geoaxes import GeoAxes
+from cartopy.mpl.ticker import LatitudeFormatter
+from netCDF4 import Dataset, default_fillvals
+
+from .constants import EARTH_FLATTENING, EARTH_RADIUS_EQUATORIAL, C
+from .gw_plot_params import (
+    ALTERNATE_FIG_SIZE,
+    AVERAGING_WINDOW,
+    BT,
+    DARK_MODE_FACE_COLOR,
+    DARK_MODE_FILL_COLOR,
+    DARK_MODE_GRID_COLOR,
+    DARK_MODE_TEXT_COLOR,
+    DATA_TRANSFORM,
+    DBS_MOD,
+    DEFAULT_FIG_SIZE,
+    DFLT_RES,
+    FLD_CLR,
+    FLD_CMP,
+    FLD_MODES,
+    MEM_CLR,
+    MEM_LOOK_DIRECTIONS,
+    MEM_NUMBERS,
+    MEM_SYMS,
+    NORTH,
+    NUM_FLD,
+    NUM_MEM,
+    O2_CTR_FREQ_MHZ,
+    REFERENCE_ALTITUDE_KM,
+    SAT_COL,
+    SOUTH,
+    SPACECRAFT,
+    TERMINATOR_ALPHA,
+    TERMINATOR_COLOR,
+    TOT_MOD,
+)
+from .gw_plot_utils import (
+    add_pipeline_metadata,
+    add_product_metadata,
+    get_datetime_from_utc_string,
+    map_inverted_continents,
+    map_magnetic_continents,
+    moving_average,
+    overlay_ezie_logo,
+    plot_geomagnetic_references,
+    save_close_figure,
+    set_xaxis_tick_format,
+    set_yaxis_tick_format,
+)
+
+# endregion
+
+# region globals
+mpl.use("Agg")  # No interactive python window, can run headless
+logger = logging.getLogger(__name__)
+GEO_LAT_LOWER_LIMIT = 30.0
+MAG_LAT_LOWER_LIMIT = 40.0
+FREQ_BIN_DELTA = 205  # Number of frequency bins to extract either side of line center
+FREQ_DELTA_MHZ = 3.5  # Mhz to show on either side of line center
+NCDF_MISSING = default_fillvals["f4"]
+PLT_NDX = [
+    1,
+    2,
+    3,
+    0,
+]  # Positions of MEM[n] in stack of plots (top to bottom, ordered by angle WRT nadir)
+
+# rc_fonts = {
+#     "text.usetex": True,
+#     # "text.latex.preview": True,
+#     "font.size": 20,
+#     "axes.titlesize": 22,
+#     "axes.labelsize": 22,
+#     "legend.fontsize": 20,
+#     "xtick.labelsize": 20,
+#     "ytick.labelsize": 20,
+#     "figure.titlesize": 22,
+#     "mathtext.default": "regular",
+#     # "text.latex.preamble": [r"""\usepackage{bm}"""],
+# }
+# mpl.rcParams.update(rc_fonts)
+
+# endregion
+
+
+def coverage_plot_polar_layout(
+    observation_date: datetime.datetime,
+    hemisphere: str,
+    show_terminator_at: datetime.datetime | None = None,
+    show_mag_lat: bool = False,
+    south_inverted: bool = False,
+    dark_mode: bool = False,
+):
+    # Instantiate figure and axes for plotting - tweak some rcparams as needed
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    fig = plt.figure(figsize=ALTERNATE_FIG_SIZE)
+    hndx = 0
+    rows, cols = 1, len(SPACECRAFT)
+    maprowspan = 1
+    lat_lower_limit = MAG_LAT_LOWER_LIMIT
+    lats_n = np.arange(lat_lower_limit, 90.0, 10.0)  # Lats at which to draw gridlines
+
+    ccw = +1
+    if hemisphere == NORTH or hemisphere is None:
+        proj_method = ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
+    elif hemisphere == SOUTH:
+        proj_method = ccrs.SouthPolarStereo(central_longitude=180)  # 0 is default
+        if not south_inverted:
+            ccw = -1
+
+    all_axs: dict = {}
+    for sndx, spcrft in enumerate(SPACECRAFT):
+        map_axs: GeoAxes = plt.subplot2grid(
+            (rows, cols),
+            (hndx, sndx),
+            rowspan=maprowspan,
+            colspan=1,
+            projection=proj_method,
+        )
+        # ty:ignore[invalid-assignment]
+
+        if hemisphere is not None:
+            x_0, y_0 = proj_method.transform_point(
+                0,
+                90 if hemisphere == NORTH else -90,
+                src_crs=DATA_TRANSFORM,
+            )
+            x_1, y_1 = proj_method.transform_point(
+                45,
+                MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+                src_crs=DATA_TRANSFORM,
+            )
+            map_meters: float = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+            map_axs.set_extent(
+                (
+                    -map_meters,
+                    +map_meters,
+                    -map_meters,
+                    +map_meters,
+                ),
+                crs=proj_method,
+            )
+            # Compute a circle in axes coordinates that will be used as a clipping
+            # boundary for the map.
+            theta = np.linspace(0, 2 * np.pi, 100)
+            center, radius = [0.5, 0.5], 0.5
+            verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+            circle = mpath.Path(verts * radius + center)
+            map_axs.set_boundary(circle, transform=map_axs.transAxes)
+
+        lon_delta = 30.0
+        gl = map_axs.gridlines(
+            draw_labels=True,
+            x_inline=False,
+            xlocs=np.arange(-180.0, 180.0, lon_delta),
+            y_inline=True,
+            ylocs=lats_n if hemisphere == NORTH else [-1 * lat for lat in lats_n],
+            color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+        )
+        gl.xlabel_style = {
+            "size": 1,
+            "color": "white" if not dark_mode else DARK_MODE_FACE_COLOR,
+        }  # Suppress longitudes, we'll add MLT ourselves
+        gl.ylabel_style = {"size": "small", "zorder": 5}
+
+        # Add labels in MLT to the polar stereographic plot, with 0 at bottom (-y axis)
+        mlt_locs = np.arange(0, 360.0, lon_delta)
+        mlt_desc = {}
+        for mm, mlt in enumerate(mlt_locs):
+            mlt_desc[f"{mlt:.0f}"] = f"{mlt / 15:02.0f}H"
+        mlt_desc["0"] = "Midnight"
+        mlt_desc["90"] = "Dawn"
+        mlt_desc["180"] = "Noon"
+        mlt_desc["270"] = "Dusk"
+        for mm, mlt in enumerate(mlt_locs):
+            mlt_pos = (ccw * mlt - 90.0) % 360.0  # Rotate to coord sys with 0 at x axis
+            x = 0.5 + 0.55 * np.cos(np.radians(mlt_pos))
+            y = 0.5 + 0.55 * np.sin(np.radians(mlt_pos))
+            map_axs.text(
+                x,
+                y,
+                mlt_desc[f"{mlt:.0f}"],
+                transform=map_axs.transAxes,
+                color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                va="center",
+                horizontalalignment="center",
+            )
+
+        if show_terminator_at is not None:
+            # FIXME: Take difference from noon or midnight and flip sign to make this
+            # work when plotting with south_inverted set
+            map_axs.add_feature(
+                Nightshade(
+                    show_terminator_at,
+                    alpha=TERMINATOR_ALPHA,
+                    color=TERMINATOR_COLOR,
+                    zorder=2,
+                )
+            )
+
+        x_0, y_0 = proj_method.transform_point(
+            0,
+            90 if hemisphere == NORTH else -90,
+            src_crs=DATA_TRANSFORM,
+        )
+        x_1, y_1 = proj_method.transform_point(
+            45,
+            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+            src_crs=DATA_TRANSFORM,
+        )
+        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+        map_axs.set_extent(
+            (
+                -map_meters,
+                +map_meters,
+                -map_meters,
+                +map_meters,
+            ),
+            crs=proj_method,
+        )
+
+        # Compute a circle in axes coordinates that will be used as a clipping boundary
+        # for the map.
+        theta = np.linspace(0, 2 * np.pi, 100)
+        center, radius = [0.5, 0.5], 0.5
+        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+        circle = mpath.Path(verts * radius + center)
+        map_axs.set_boundary(circle, transform=map_axs.transAxes)
+
+        # Set axes title and save axes object in dictionary for use below
+        map_axs.set_title(f"{spcrft} - {hemisphere}", loc="left", pad=12)
+        all_axs[sndx] = map_axs
+
+    return fig, all_axs
+
+
+def coverage_plot_stereographic_layout(
+    observation_date: datetime.datetime,
+    hemisphere: str,
+    show_terminator_at: datetime.datetime | None = None,
+    show_mag_lat: bool = False,
+    south_inverted: bool = False,  # for compatibility w/other plot method calls
+    dark_mode: bool = False,
+):
+    # Instantiate figure and axes for plotting - tweak some rcparams as needed
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    # cartopy does NOT use these, adjust with gridlines artist below
+    # plt.rcParams["xtick.labelsize"] = "small"
+    # plt.rcParams["ytick.labelsize"] = "small"
+
+    fig = plt.figure(figsize=ALTERNATE_FIG_SIZE)
+    hndx = 0
+    rows, cols = 1, len(SPACECRAFT)
+    maprowspan = 1
+    lat_lower_limit = GEO_LAT_LOWER_LIMIT if show_mag_lat else MAG_LAT_LOWER_LIMIT
+    lats_n = np.arange(lat_lower_limit, 90, 10)  # Latitudes at which to draw gridlines
+
+    if hemisphere is None:
+        hemisphere = NORTH
+
+    if hemisphere == NORTH:
+        proj_method = ccrs.NorthPolarStereo()
+    else:
+        proj_method = ccrs.SouthPolarStereo()
+
+    all_axs = {}
+    for sndx, spcrft in enumerate(SPACECRAFT):
+        map_axs: GeoAxes = plt.subplot2grid(
+            (rows, cols),
+            (hndx, sndx),
+            rowspan=maprowspan,
+            colspan=1,
+            projection=proj_method,
+        )  # ty:ignore[invalid-assignment]
+
+        gl = map_axs.gridlines(
+            draw_labels=True,
+            x_inline=False,
+            xlocs=range(-180, 180, 30),
+            y_inline=True,
+            ylocs=lats_n if hemisphere == NORTH else [-1 * lat for lat in lats_n],
+            color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+        )
+        gl.xlabel_style = {"size": "small"}
+        gl.ylabel_style = {"size": "small"}
+
+        if show_terminator_at is not None:
+            # FIXME: Take difference from noon or midnight and flip sign to make this
+            # work when plotting with south_inverted set
+            map_axs.add_feature(
+                Nightshade(
+                    show_terminator_at,
+                    alpha=TERMINATOR_ALPHA,
+                    color=TERMINATOR_COLOR,
+                    zorder=2,
+                )
+            )
+        x_0, y_0 = proj_method.transform_point(
+            0,
+            90 if hemisphere == NORTH else -90,
+            src_crs=DATA_TRANSFORM,
+        )
+        x_1, y_1 = proj_method.transform_point(
+            45,
+            lat_lower_limit if hemisphere == NORTH else -lat_lower_limit,
+            src_crs=DATA_TRANSFORM,
+        )
+        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+        map_axs.set_extent(
+            (
+                -map_meters,
+                +map_meters,
+                -map_meters,
+                +map_meters,
+            ),
+            crs=proj_method,
+        )
+
+        # Compute a circle in axes coordinates that will be used as a clipping boundary
+        # for the map.
+        theta = np.linspace(0, 2 * np.pi, 100)
+        center, radius = [0.5, 0.5], 0.5
+        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+        circle = mpath.Path(verts * radius + center)
+        map_axs.set_boundary(circle, transform=map_axs.transAxes)
+
+        if show_mag_lat:
+            # Add _first_ legend, indicating latitude coordinate types
+            geo_lat_artist = plt.Line2D(
+                (0, 1),
+                (0, 0),
+                color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                linestyle="solid",
+                lw=1,
+            )
+            mag_lat_artist = plot_geomagnetic_references(
+                map_axs,
+                observation_date,
+                latitudes=(
+                    lats_n if hemisphere == NORTH else [-1 * lat for lat in lats_n]
+                ),
+                lat_clr="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+            )
+            _lat_lgd = map_axs.legend(
+                [geo_lat_artist, mag_lat_artist],
+                ["Geodetic", "Geomagnetic"],
+                bbox_to_anchor=(1.10, 1.00),
+                loc="lower right",
+                # Use raw string to avoid invalid escape sequence warning from \circ
+                title=r"Latitude: $10^\circ$grid",
+                title_fontsize="small",
+                fontsize="x-small",
+            )
+            map_axs.add_artist(_lat_lgd)
+
+        # Set axes title and save axes object in dictionary for use below
+        map_axs.set_title(f"{spcrft} - {hemisphere}", loc="left", pad=12)
+        all_axs[sndx] = map_axs
+
+    return fig, all_axs
+
+
+def mollweide_layout(
+    observation_date: datetime.datetime,
+    show_terminator_at: datetime.datetime | None = None,
+    num_sc: int = 1,
+    show_mag_lat: bool = False,
+    dark_mode: bool = False,
+):
+    # Instantiate figure and axes for plotting - tweak some rcparams as needed
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    # cartopy does NOT use these, adjust with gridlines artist below
+    # plt.rcParams["xtick.labelsize"] = "small"
+    # plt.rcParams["ytick.labelsize"] = "small"
+
+    fig = plt.figure(figsize=(ALTERNATE_FIG_SIZE[0], num_sc * ALTERNATE_FIG_SIZE[1]))
+    rows, cols = 2 * num_sc, 3
+    maprowspan = 2
+    mapcolspan = 3
+    lats_n = np.arange(-30, 31, 10)  # Latitudes at which to draw gridlines
+    proj_method = ccrs.Mollweide()
+
+    all_axs = {}
+    for sndx in range(num_sc):
+        map_axs: GeoAxes = plt.subplot2grid(
+            (rows, cols),
+            (2 * sndx, 0),
+            rowspan=maprowspan,
+            colspan=mapcolspan,
+            projection=proj_method,
+        )  # ty:ignore[invalid-assignment]
+
+        map_axs.set_global()
+        gl = map_axs.gridlines(
+            draw_labels=True,
+            # x_inline=True,
+            # y_inline=True,
+            xlocs=range(-180, 180, 30),
+            ylocs=range(-90, 91, 15),
+            color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+        )
+        gl.xlabel_style = {"size": "small"}
+        gl.ylabel_style = {"size": "small"}
+
+        if show_terminator_at is not None:
+            # FIXME: Take difference from noon or midnight and flip sign to make this
+            # work when plotting with south_inverted set
+            map_axs.add_feature(
+                Nightshade(
+                    show_terminator_at,
+                    alpha=TERMINATOR_ALPHA,
+                    color=TERMINATOR_COLOR,
+                    zorder=2,
+                )
+            )
+
+        if show_mag_lat:
+            # Add _first_ legend, indicating latitude coordinate types
+            geo_lat_artist = plt.Line2D(
+                (0, 1),
+                (0, 0),
+                color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                linestyle="solid",
+                lw=1,
+            )
+            _mag_lat_artist = plot_geomagnetic_references(
+                map_axs,
+                observation_date,
+                latitudes=[0],
+                ls="solid",
+                lw=2,
+                lat_clr="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+            )
+            mag_lat_artist = plot_geomagnetic_references(
+                map_axs,
+                observation_date,
+                latitudes=lats_n,
+                lat_clr="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+            )
+            _lat_lgd = map_axs.legend(
+                [geo_lat_artist, mag_lat_artist],
+                [
+                    r"Geodetic, $15^\circ$",
+                    r"Geomagnetic, $10^\circ$",
+                ],
+                bbox_to_anchor=(1.00, 0.90),
+                loc="lower right",
+                # Use raw string to avoid invalid escape sequence warning from \circ
+                title="Latitude Grid",
+                title_fontsize="small",
+                fontsize="x-small",
+            )
+            map_axs.add_artist(_lat_lgd)
+            all_axs[sndx] = map_axs
+
+        # Set axes title and save axes object in dictionary for use below
+        map_axs.set_title(f"{SPACECRAFT[sndx]} ", loc="left", weight="bold")  # ,pad=12)
+
+    return fig, all_axs
+
+
+def plot_geolocation(
+    nc_data: Dataset,
+    source: Path,
+    indices: tuple,
+    save_directory: Path,
+    figure_dpi: int = DFLT_RES,
+    dark_mode: bool = False,
+    overwrite: bool = False,
+):
+    """
+    Plot geolocation parameters using L2 files (or any other product level containing
+    the required geolocation fields).
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    geo_group = nc_data.groups["Geolocation"]
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+
+    # Get time data and convert to datetime objects
+    time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
+    i0, i1 = indices
+    t_stamp = time_utc[i0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][i0]
+    # FIXME: Attempt to trim slewing observations at start and finish
+    # if i1 - i0 > 12:
+    #     use_obs = np.s_[i0 + 5 : i1 - 5]
+    # else:
+    use_obs = np.s_[i0:i1]
+    time_utc = time_utc[use_obs]
+    plot_type = "geolocation"
+
+    ftgt: Path = save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        name_only=True,
+    )
+    logger.debug(f"Checked file: {ftgt.as_posix()}")
+    if ftgt.exists() and not overwrite:
+        logger.info(f"File exists, skipping: {ftgt.as_posix()}")
+        return
+    logger.info("Generating geolocation plot")
+
+    # Prepare subplots for grouped geolocation parameters
+    rows = 5
+    cols = 2
+    fig, axs = plt.subplots(rows, cols, figsize=DEFAULT_FIG_SIZE, sharex=True)
+
+    # Define groups of variables to plot in each window
+    groups = [
+        [("sat_pos_eci", "Cart"), ("sat_pos_ecef", "Cart")],
+        [("sat_vel_eci", "Cart"), ("sat_vel_ecef", "Cart")],
+        [
+            ("sat_att_quaternion_eci", "Quaternion"),
+            ("sat_att_quaternion_ecef", "Quaternion"),
+            ("sat_att_quaternion_lvlh", "Quaternion"),
+        ],
+        [("sat_roll",), ("sat_pitch",), ("sat_yaw",)],
+        [("sat_roll_rate",), ("sat_pitch_rate",), ("sat_yaw_rate",)],
+        [("sat_solar_zen",), ("sat_solar_az",)],
+        [("reference_altitude",)],
+        [
+            ("look_dir1", "Cart"),
+            ("look_dir2", "Cart"),
+            ("look_dir3", "Cart"),
+            ("look_dir4", "Cart"),
+        ],
+        [
+            ("earth_inc_ang1",),
+            ("earth_inc_ang2",),
+            ("earth_inc_ang3",),
+            ("earth_inc_ang4",),
+        ],
+        [("data_flag",)],
+    ]
+
+    # Plot each group of variables
+    for ax, group in zip(axs.flat, groups, strict=False):
+        long_name = "Unknown"
+        units = "None"
+        for var_name, *dims in group:
+            if var_name in geo_group.variables:
+                var_data = geo_group.variables[var_name][use_obs]
+                # Get long name and units for plot axes labels, if available.
+                if hasattr(geo_group.variables[var_name], "long_name"):
+                    long_name = geo_group.variables[var_name].long_name
+                if hasattr(geo_group.variables[var_name], "units"):
+                    units = geo_group.variables[var_name].units
+                if dims:
+                    for i in range(var_data.shape[1]):
+                        ax.plot(time_utc, var_data[:, i], label=f"{var_name}_{i}")
+                else:
+                    ax.plot(time_utc, var_data, label=var_name)
+        try:
+            trim_pos = long_name.index("Unit")
+            long_name = long_name[0:trim_pos]
+        except ValueError:
+            pass
+        ax.set_ylabel(f"{long_name}\n({units})", fontsize="x-small")
+        _h, _l = ax.get_legend_handles_labels()
+        ax.legend(loc="upper left", ncols=2 if len(_l) > 4 else 1, fontsize="x-small")
+        ax.grid(True)
+        set_xaxis_tick_format(
+            ax,
+            use_seconds=(time_utc[-1] - time_utc[0]).total_seconds() < 120,
+        )
+
+    for col in range(cols):
+        axs[rows - 1, col].set_xlabel(
+            f"Time (UTC) - {time_utc[0].strftime('%Y-%m-%d')}", weight="bold"
+        )
+
+    # Tweak position and add any figure-level annotation
+    fig_title = (
+        f"Geolocation Parameters: {sc_id} - Orbit {orb_num}\n"
+        f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+        f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
+    )
+    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+    add_pipeline_metadata(fig, nc_data)
+    overlay_ezie_logo(fig)
+    plt.subplots_adjust(
+        left=0.06, right=0.98, bottom=0.07, top=0.93, wspace=0.12, hspace=0.01
+    )
+    save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        figure=fig,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        dpi=figure_dpi,
+    )
+
+
+def plot_ancillary(
+    nc_data: Dataset,
+    source: Path,
+    indices: tuple,
+    save_directory: Path,
+    figure_dpi: int = DFLT_RES,
+    dark_mode: bool = False,
+    overwrite: bool = False,
+):
+    """
+    Plot the reference IGRF B field values stored in the Ancillary group
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    # Get time data and convert to datetime objects
+    time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
+    i0, i1 = indices
+    t_stamp = time_utc[i0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][i0]
+    # FIXME: Attempt to trim slewing observations at start and finish
+    # if i1 - i0 > 12:  # Slew from SkyCal at start? Trim a few steps?
+    #     use_obs = np.s_[i0 + 5 : i1 - 5]
+    # else:
+    use_obs = np.s_[i0:i1]
+    time_utc = time_utc[use_obs]
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+    plot_type = "ancillary"
+
+    ftgt: Path = save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        name_only=True,
+    )
+    logger.debug(f"Checked file: {ftgt.as_posix()}")
+    if ftgt.exists() and not overwrite:
+        logger.info(f"File exists, skipping: {ftgt.as_posix()}")
+        return
+    logger.info("Generating plot of ancillary data")
+
+    # Prepare figure for plotting with sharex and sharey
+    fig, axs = plt.subplots(
+        1, NUM_FLD, figsize=DEFAULT_FIG_SIZE, sharex=False, sharey=True
+    )
+
+    # Plot each anc_model_bgeo variable in separate subplots
+    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+        # ax = axs[(mem_ndx - 1) // 2, (mem_ndx - 1) % 2]
+        ax = axs[mem_ndx]
+        var_bgeon = nc_data[f"Ancillary/anc_model_bgeon{mem_num}"][use_obs]
+        var_bgeoe = nc_data[f"Ancillary/anc_model_bgeoe{mem_num}"][use_obs]
+        var_bgeod = nc_data[f"Ancillary/anc_model_bgeod{mem_num}"][use_obs]
+        var_bgeo = nc_data[f"Ancillary/anc_model_bgeo{mem_num}"][use_obs]
+
+        b_vars = [var_bgeon, var_bgeoe, var_bgeod, var_bgeo]
+        for vv, b_var in enumerate(b_vars):
+            ax.plot(time_utc, b_var, label=FLD_CMP[vv], color=FLD_CLR[vv])
+
+        # Format the x-axis to show only hours and minutes
+        set_xaxis_tick_format(ax, max_ticks=16 // NUM_FLD + 1, rotation=45)
+        ax.set_title(
+            f"MEM {mem_num} - "
+            f"Look Direction {MEM_LOOK_DIRECTIONS[mem_ndx]}"
+            r"º",
+            # r"$\bf{^\circ}$",
+            weight="bold",
+            size="medium",
+        )
+        ax.grid(True)
+        ax.set_xlabel("Time (UTC)", weight="bold")
+        if mem_ndx == 0:
+            ax.set_ylabel("Ancillary B-Fields\n(nT)", weight="bold")
+            ax.legend(loc="upper left")
+
+    # Tweak position and add any figure-level annotation
+    # title_date_time = time_utc[len(time_utc) // 2]  # get midpoint of observation
+    fig_title = "Ancillary B Field Values: "
+    fig_title = fig_title + (
+        f"{sc_id} - Orbit {orb_num}\n"
+        f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S UT')} - "
+        f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S UT')}"
+    )
+    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+    add_pipeline_metadata(fig, nc_data)
+    overlay_ezie_logo(fig)
+    plt.subplots_adjust(
+        left=0.07,
+        right=0.98,
+        bottom=0.10,
+        top=0.91,
+        hspace=0.00,
+        wspace=0.00,
+    )
+    save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        figure=fig,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        dpi=figure_dpi,
+    )
+
+
+def plot_calibration(
+    nc_data: Dataset,
+    source: Path,
+    indices: tuple,
+    save_directory: Path,
+    t_diff: bool = False,
+    figure_dpi: int = DFLT_RES,
+    dark_mode: bool = False,
+    overwrite: bool = False,
+):
+    """
+    Plot the calibrated Ta and Tb scene temperatures as images with frequency on the x
+    axis and time on the y axis.
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    # Get time data and convert to datetime objects
+    time_utc, obs_date = get_datetime_from_utc_string(
+        nc_data.groups["Time"], indices=indices
+    )
+    i0, i1 = indices
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+    product = nc_data.getncattr("product")
+    t_stamp = time_utc[0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][i0]
+
+    t_kinds = ["TA", "TB"]
+    # t_kinds = ["TB"]
+    stokes = ["V", "H", "S3", "S4"]
+    num_cols = len(stokes)
+    num_rows = len(MEM_NUMBERS)
+
+    if product == "L1":
+        # Working from L1
+        tkind_vars = [
+            "CalibratedSceneTemperatures/ta",
+            "CalibratedSceneTemperatures/tb",
+        ]
+        # 1e3 => GHZ to MHz
+        frequency_MHZ = nc_data["FrequencyGrid/frequency"][:] * 1.0e3
+        ckind = "calibration"
+
+    else:
+        # Working from L0B
+        ckind = "calibration_l0b"
+        tkind_vars = [
+            "Calibration/Anc_ta",
+            "Calibration/Anc_tb",
+        ]
+        wavenumbers = nc_data["FrequencyGrid/wavenumbers"][:]  # frequency data
+        # Constants: wavenumbers in cm^-1, C in m/s: 100 => m to cm, 1e-6 => Hz to MHz
+        frequency_MHZ = C * 100.0 * wavenumbers * 1e-6
+
+    freq_mhz_delta = frequency_MHZ - O2_CTR_FREQ_MHZ
+    fc = np.argmin(np.abs(freq_mhz_delta))
+    f0 = max(0, fc - FREQ_BIN_DELTA)
+    f1 = min(len(freq_mhz_delta), fc + FREQ_BIN_DELTA)
+    freq_mhz_delta = freq_mhz_delta[f0:f1]
+
+    if not t_diff:
+        cmap = mpl.colormaps["viridis"]
+        cmap.set_bad("white", 0.0)
+    else:
+        cmap = mpl.colormaps["bwr"]
+        cmap.set_bad("black", 0.0)
+    for kk, t_kind in enumerate(t_kinds):
+        t_kind_str = t_kind if not t_diff else f"{t_kind}_difference"
+
+        ftgt: Path = save_close_figure(
+            source=source,
+            save_directory=save_directory,
+            obs_date=obs_date,
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            plot_type=f"{ckind}-{t_kind_str}",
+            name_only=True,
+        )
+        logger.debug(f"Checked file: {ftgt.as_posix()}")
+        if ftgt.exists() and not overwrite:
+            logger.info(f"File exists, skipping: {ftgt.as_posix()}")
+            continue
+        logger.info(f"Generating calibrated scene temperature plot ({t_kind})")
+
+        fig, axs = plt.subplots(
+            num_rows + 1,
+            num_cols,
+            figsize=DEFAULT_FIG_SIZE,
+            sharey=True,
+            height_ratios=[1, 1, 1, 1, 0.25],
+        )
+        for col in range(num_cols):  # Iterate over columns (Stokes parameters)
+            # Auto-scaling of Ta and Tb range (not a good idea, but save for later?)
+            # vmins, vmaxs = [], []
+            # for row in range(1, 5):  # Iterate over TA1...TA4 or TB1...TB4
+            #     var_name = f"{tkind_vars[kk]}{row}"
+            #     data = nc_data[var_name][i0:i1, :, col]  # Shape:(ObsRate, Freq_Array)
+            #     vmins.append(data.min())
+            #     vmaxs.append(data.max())
+            # vmin, vmax = min(vmins), max(vmaxs)
+
+            # Set fixed scale for Ta and Tb
+            if not t_diff:
+                match stokes[col].upper():
+                    case "H" | "V":
+                        vmin, vmax = +150, +300
+                    case "S3" | "S4":
+                        vmin, vmax = -40, +40
+            else:
+                match stokes[col].upper():
+                    case "H" | "V" | "S3":
+                        vmin, vmax = -25, +25
+                    case "S3" | "S4":
+                        vmin, vmax = -50, +50
+
+            for row in range(0, num_rows):
+                ax = axs[row, col]
+                var_name = f"{tkind_vars[kk]}{row + 1}"
+                var_title = f"{t_kind.upper()}{row + 1}"
+                data = nc_data[var_name][i0:i1, :, col]  # Shape: (ObsRate, Freq_Array)
+                if t_diff:
+                    data -= data[0, :]
+                tgrd = np.tile(time_utc, (freq_mhz_delta.shape[0], 1)).T
+
+                # TODO - Mask off time steps where we were not in EARTHLOOK mode?
+                c = ax.pcolormesh(
+                    freq_mhz_delta,
+                    tgrd,
+                    data[:, f0:f1],
+                    shading="auto",
+                    vmin=vmin,
+                    vmax=vmax,
+                    cmap=cmap,
+                )
+                ax.set_title(f"{var_title} Stokes {stokes[col]}")
+                ax.set_xlim([-FREQ_DELTA_MHZ, +FREQ_DELTA_MHZ])
+                # ax.xaxis.set_major_locator(plt.MaxNLocator(7))
+                if row == num_rows - 1:
+                    ax.set_xlabel("Offset from Center Frequency (MHz)\n   ")
+                else:
+                    ax.set_xticklabels([])
+                if col == 0:
+                    ax.set_ylabel("Time (UTC)")
+                    set_yaxis_tick_format(ax)
+                if col == num_cols - 1:
+                    ax.text(
+                        1.01,
+                        0.50,
+                        f"MEM {row + 1}",
+                        ha="left",
+                        va="center",
+                        transform=ax.transAxes,
+                        rotation=90,
+                    )
+
+            # Add colorbar
+            ax = axs[num_rows, col]  # axis row just for colorbar
+            ax.set_axis_off()  # turn off visible axes components
+            _cbar = plt.colorbar(
+                c,
+                ax=ax,
+                orientation="horizontal",
+                location="bottom",
+                fraction=0.45,
+                extend="both",
+            )
+            if t_diff:
+                _cbar.set_label("Brightness Temperature Difference (K)")
+            else:
+                _cbar.set_label("Brightness Temperature (K)")
+
+        # Tweak position and add any figure-level annotation
+        plt.subplots_adjust(
+            left=0.05,
+            right=0.98,
+            bottom=0.08,
+            top=0.915,
+            wspace=0.02,
+            hspace=0.22,
+        )
+        fig_title = (
+            f"{product} Brightness Temperature - {t_kind_str} : "
+            f"{sc_id} - Orbit {orb_num}\n"
+            f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+            f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
+        )
+        fig.suptitle(
+            fig_title,
+            weight="bold",
+            fontsize="x-large",
+            y=0.99,
+            va="top",
+        )
+        add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+        add_pipeline_metadata(fig, nc_data)
+        overlay_ezie_logo(fig)
+        save_close_figure(
+            source=source,
+            save_directory=save_directory,
+            figure=fig,
+            obs_date=obs_date,
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            plot_type=f"{ckind}-{t_kind_str}",
+            dpi=figure_dpi,
+        )
+
+
+def plot_retrieved_b_fields(
+    nc_data: Dataset,
+    source: Path,
+    save_directory: Path,
+    version: str | None = None,
+    dark_mode: bool = False,
+    figure_dpi: int = DFLT_RES,
+    overwrite: bool = False,
+):
+    """
+    Plot the retrieved B fields for each MEM in two formats, along with their estimated
+    errors. Errors for individual dBs are calculated from the derived covariance values.
+    Errors for the total B field are calculated as a weighted average of the errors from
+    each inidiviual N-E-D component. The two formats are:
+    1) Just the dBs for the N-E-D components ( 4 MEM x 3 B )
+    2) Both the N-E-D components and the B totals for each MEM ( 4 MEM x 4 B )
+    """
+    logger.info("Generating retrieved and reference B field plots")
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    # Collate netcdf data for all spacecraft and orbits on the selected day
+
+    # Get time data and convert to datetime objects
+    # L2 files are already broken up into discrete science passes
+    time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
+    t_stamp = time_utc[0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][0]
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+    # FIXME: Attempt to trim slewing observations at start and finish
+    # if len(time_utc) > 12:
+    #     use_obs = np.s_[5:-5]
+    # else:
+    use_obs = np.s_[:]
+
+    max_win = len(time_utc[use_obs])
+    ave_win = min(AVERAGING_WINDOW, max_win)
+
+    # MEM retrieved dBs
+    mem_dbn_val = [f"RetrievedParameters/retrieved_dbgeon{mm}" for mm in MEM_NUMBERS]
+    mem_dbe_val = [f"RetrievedParameters/retrieved_dbgeoe{mm}" for mm in MEM_NUMBERS]
+    mem_dbd_val = [f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS]
+    mem_dbt_val = [f"RetrievedParameters/retrieved_dbgeo{mm}" for mm in MEM_NUMBERS]
+
+    # MEM footprint reference model (IGRF) B fields
+    igrf_bn_val = [f"Ancillary/anc_model_bgeon{mm}" for mm in MEM_NUMBERS]
+    igrf_be_val = [f"Ancillary/anc_model_bgeoe{mm}" for mm in MEM_NUMBERS]
+    igrf_bd_val = [f"Ancillary/anc_model_bgeod{mm}" for mm in MEM_NUMBERS]
+    igrf_bt_val = [f"Ancillary/anc_model_bgeo{mm}" for mm in MEM_NUMBERS]
+
+    # Covariance fields
+    mem_bnn_cov = [f"RetrievedParameters/cov_nn{mm}" for mm in MEM_NUMBERS]
+    mem_bee_cov = [f"RetrievedParameters/cov_ee{mm}" for mm in MEM_NUMBERS]
+    mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
+    mem_bne_cov = [f"RetrievedParameters/cov_ne{mm}" for mm in MEM_NUMBERS]
+    mem_bnd_cov = [f"RetrievedParameters/cov_nd{mm}" for mm in MEM_NUMBERS]
+    mem_bed_cov = [f"RetrievedParameters/cov_ed{mm}" for mm in MEM_NUMBERS]
+
+    # Retrieved Btot value and Btot error
+    mem_btv_val = [f"RetrievedParameters/retrieved_b_tot{mm}" for mm in MEM_NUMBERS]
+    mem_bte_val = [f"RetrievedParameters/retrieved_b_tot_err{mm}" for mm in MEM_NUMBERS]
+
+    # Stack MEM arrays so we can index and loop through them by number rather than using
+    # 4 separate variable names.
+    mem_dbn = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbn_val],))  # 4xn_obs
+    mem_dbe = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbe_val],))
+    mem_dbd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbd_val],))
+    mem_dbt = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbt_val],))
+    igrf_bn = np.vstack((*[nc_data[nc_fld] for nc_fld in igrf_bn_val],))  # 4xn_obs
+    igrf_be = np.vstack((*[nc_data[nc_fld] for nc_fld in igrf_be_val],))
+    igrf_bd = np.vstack((*[nc_data[nc_fld] for nc_fld in igrf_bd_val],))
+    igrf_bt = np.vstack((*[nc_data[nc_fld] for nc_fld in igrf_bt_val],))
+    rtrv_bt = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_btv_val],))
+    rtrv_be = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bte_val],))
+    mem_cnn = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bnn_cov],))
+    mem_cee = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bee_cov],))
+    mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
+    mem_cne = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bne_cov],))
+    mem_ced = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bed_cov],))
+    mem_cnd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bnd_cov],))
+
+    # Stack field components in addition to MEMs to create 3-D array, nB x 4 MEM x n_obs
+    igrf_bf = np.stack((*[igrf_bn, igrf_be, igrf_bd, igrf_bt],))
+    mem_dbs = np.stack((*[mem_dbn, mem_dbe, mem_dbd, mem_dbt],))
+    mem_cov = np.stack((*[mem_cnn, mem_cee, mem_cdd, mem_cne, mem_ced, mem_cnd],))
+
+    # Plot magnetic field reference values and deltas from EZIE OSSE retrieval along
+    # EZIE MEM lines of sight.
+    for fld_mod in FLD_MODES:
+        # FLD_MODES ==> Plot reference (IGRF) B field vectors or dBs?
+        logger.info(f"Generating plot of B field {fld_mod}")
+        if fld_mod == TOT_MOD:
+            rows, cols = NUM_FLD, NUM_MEM  # Include B_Total
+        else:
+            rows, cols = NUM_FLD - 1, NUM_MEM  # Do NOT include [meaningless] dB_Total
+
+        # use = np.full_like(time_utc[:], fill_value=True, dtype=bool)
+        fig, axs = plt.subplots(
+            rows,
+            cols,
+            figsize=DEFAULT_FIG_SIZE,
+            sharex=True,
+            sharey=False,
+        )
+
+        # We'll save the total variable range for each field component across
+        # all MEMs here, adjusting plot limits afterwards when we know what the
+        # correct range is for the whole ensemble.
+        b_rng = np.full((NUM_FLD, 2), fill_value=np.nan)  # 4 B x [min,max]
+
+        for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+            col = mem_ndx % cols
+            for fld_ndx, fld_cmp in enumerate(FLD_CMP):
+                # Tweak axis row position depending on whether or not we're plotting
+                # just the N-E-D components of B or adding B total as well.
+                if fld_mod == DBS_MOD:
+                    if fld_cmp == BT:
+                        # No B_TOT plots for dBs, only for full fields
+                        continue
+                    row = (mem_ndx // cols) * NUM_FLD + fld_ndx
+                else:
+                    row = (mem_ndx // cols) * NUM_FLD + (fld_ndx + 1) % NUM_FLD
+                mem_axs = axs[row, col]
+
+                if fld_mod == TOT_MOD:
+                    mem_axs.plot(
+                        time_utc[use_obs],
+                        igrf_bf[fld_ndx][mem_ndx][use_obs],
+                        color=FLD_CLR[fld_ndx],
+                        linewidth=2.0,
+                        linestyle="solid",
+                        zorder=3,
+                    )
+                    if fld_cmp == BT:  # B total
+                        mbt = np.sqrt(
+                            (
+                                igrf_bf[0][mem_ndx][use_obs]
+                                + mem_dbs[0][mem_ndx][use_obs]
+                            )
+                            ** 2
+                            + (
+                                igrf_bf[1][mem_ndx][use_obs]
+                                + mem_dbs[1][mem_ndx][use_obs]
+                            )
+                            ** 2
+                            + (
+                                igrf_bf[2][mem_ndx][use_obs]
+                                + mem_dbs[2][mem_ndx][use_obs]
+                            )
+                            ** 2
+                        )
+                        # The calculated 'mbt' values above should be identical to the
+                        # corresponding retrieved_b_tot field values, plotted just
+                        # below. If they are not, we have a problem!
+                        mem_axs.errorbar(
+                            time_utc[use_obs],
+                            rtrv_bt[mem_ndx][use_obs],
+                            yerr=rtrv_be[mem_ndx][use_obs],
+                            color=FLD_CLR[NUM_FLD - 1],
+                            linestyle="dotted",
+                            errorevery=5,
+                        )
+                    else:
+                        mbt = (
+                            igrf_bf[fld_ndx][mem_ndx][use_obs]
+                            + mem_dbs[fld_ndx][mem_ndx][use_obs]
+                        )
+
+                    mem_axs.plot(
+                        time_utc[use_obs],
+                        mbt,
+                        # color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                        color=FLD_CLR[fld_ndx],
+                        linewidth=3.0,
+                        linestyle="dotted",
+                    )
+
+                    new_sample = list(mbt) + list(igrf_bf[fld_ndx][mem_ndx][use_obs])
+                    b_rng[fld_ndx, 0] = np.nanmin(
+                        list(b_rng[fld_ndx, 0:1]) + new_sample
+                    )
+                    b_rng[fld_ndx, 1] = np.nanmax(
+                        list(b_rng[fld_ndx, 1:2]) + new_sample
+                    )
+                    del new_sample
+
+                else:
+                    mem_axs.errorbar(
+                        time_utc[use_obs],
+                        mem_dbs[fld_ndx][mem_ndx][use_obs],
+                        yerr=np.sqrt(mem_cov[fld_ndx][mem_ndx][use_obs]),
+                        color=FLD_CLR[fld_ndx],
+                        linestyle="solid",
+                        errorevery=5,
+                        label=f"{fld_cmp}",
+                    )
+                    mem_axs.plot(
+                        time_utc[use_obs],
+                        moving_average(
+                            mem_dbs[fld_ndx][mem_ndx][use_obs],
+                            ave_win,
+                        ),
+                        color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                        linestyle="solid",
+                        lw=1.0,
+                        label=f"{fld_cmp} - Running Average",
+                        zorder=3,
+                    )
+                    b_rng[fld_ndx, 0] = np.nanmin(
+                        list(b_rng[fld_ndx, 0:1])
+                        + list(
+                            mem_dbs[fld_ndx][mem_ndx][use_obs]
+                            - np.sqrt(mem_cov[fld_ndx][mem_ndx][use_obs])
+                        )
+                    )
+                    b_rng[fld_ndx, 1] = np.nanmax(
+                        list(b_rng[fld_ndx, 1:2])
+                        + list(
+                            mem_dbs[fld_ndx][mem_ndx][use_obs]
+                            + np.sqrt(mem_cov[fld_ndx][mem_ndx][use_obs])
+                        )
+                    )
+
+                # Do _these_ things for both dBs and total Bs
+
+                mem_axs.grid(axis="both")
+                mem_axs.axhline(0, ls="dotted", color="black")
+                mem_axs.text(
+                    0.06,
+                    0.99,
+                    f"{fld_cmp}",
+                    transform=mem_axs.transAxes,
+                    ha="left",
+                    va="top",
+                    weight="bold",
+                    size="large",
+                    color=FLD_CLR[fld_ndx],
+                )
+                # Draw horizontal separators between stacked B field component subplots?
+                # if row != 0:
+                #     mem_axs.spines["top"].set_visible(False)
+                # if row != rows - 1:
+                #     mem_axs.spines["bottom"].set_visible(False)
+
+                # Place title with receiver number at top of each column
+                if row == 0:
+                    mem_axs.set_title(
+                        f"MEM {mem_num} - "
+                        f"Look Direction {MEM_LOOK_DIRECTIONS[mem_ndx]}"
+                        r"º",
+                        # r"$\bf{^\circ}$",
+                        weight="bold",
+                        size="medium",
+                    )
+                # Label only leftmost column y axis
+                if col != 0:
+                    mem_axs.set_yticklabels([])
+                # Label only bottom row x axis
+                if row == rows - 1:
+                    mem_axs.set_xlabel("Time (UTC)", weight="bold")
+
+        # Adjust axis y limits to be uniform for a given field component across all MEMs
+        for mem_ndx in [x - 1 for x in MEM_NUMBERS]:
+            col = mem_ndx
+            for fld_ndx, fld_cmp in enumerate(FLD_CMP):
+                if fld_mod == DBS_MOD:
+                    if fld_cmp == BT:
+                        # No B_TOT plots for dBs, only for full field
+                        continue
+                    row = (mem_ndx // cols) * NUM_FLD + fld_ndx
+                else:
+                    # Stick B_total on top, even though it's last in list of components
+                    row = (mem_ndx // cols) * NUM_FLD + (fld_ndx + 1) % NUM_FLD
+                mem_axs = axs[row, col]
+                # mem_axs.set_ylim([-2.0e4, 4.0e4])  # FIXME
+                tot_rng = b_rng[fld_ndx][1] - b_rng[fld_ndx][0]
+                mem_axs.set_ylim(
+                    b_rng[fld_ndx][i] + tot_rng * x
+                    for i, x in enumerate([-0.05, +0.05])
+                )
+                # Format the x-axis to show only hours and minutes
+                if row == rows - 1:
+                    set_xaxis_tick_format(
+                        mem_axs,
+                        max_ticks=16 // cols + 1,
+                        rotation=45,
+                        use_seconds=(time_utc[-1] - time_utc[0]).total_seconds() < 120,
+                    )
+
+        # Tweak position and add any figure-level annotation
+        if fld_mod == TOT_MOD:
+            axs[-1, -1].plot(
+                time_utc[use_obs][0:2],
+                [0, 0],
+                color=("black" if not dark_mode else DARK_MODE_GRID_COLOR),
+                linestyle="solid",
+                linewidth=2,
+                label="Background B vectors",
+            )
+            axs[-1, -1].plot(
+                time_utc[use_obs][0:2],
+                [0, 0],
+                color=("black" if not dark_mode else DARK_MODE_GRID_COLOR),
+                linestyle="dotted",
+                linewidth=3,
+                label="Retrieved B vectors",
+            )
+            axs[-1, -1].legend(loc="lower right")
+            fig_title = "Background and Retrieved Magnetic Fields: "
+            y_label = (
+                "Reference (IGRF-14) and Retrieved "
+                f"B$_\\mathbf{{{REFERENCE_ALTITUDE_KM}\\ km}}$"
+                " Field Vectors (nT)"
+            )
+        else:
+            fig_title = "Retrieved Magnetic Field Deltas: "
+            y_label = (
+                "Retrieved Current-Induced "
+                f"B$_\\mathbf{{{REFERENCE_ALTITUDE_KM}\\ km}}$"
+                " Field Vectors (nT)"
+            )
+        fig_title = fig_title + (
+            f"{sc_id} - Orbit {orb_num}\n"
+            f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+            f"{time_utc[use_obs][-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
+        )
+        fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
+        add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+        add_pipeline_metadata(fig, nc_data)
+        overlay_ezie_logo(fig)
+        fig.text(
+            0.01,
+            0.5,
+            y_label,
+            ha="left",
+            va="center",
+            rotation=90,
+            weight="bold",
+            size="large",
+        )
+        plt.subplots_adjust(
+            left=0.07,
+            right=0.98,
+            bottom=0.10,
+            top=0.91,
+            hspace=0.00,
+            wspace=0.00,
+        )
+        save_close_figure(
+            source=source,
+            save_directory=save_directory,
+            figure=fig,
+            obs_date=obs_date,
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            plot_type=f"retrieved_b_fields_{fld_mod}",  # _{i0:04d}-{i1:04d}",
+            dpi=figure_dpi,
+        )
+
+
+def plot_retrieved_bd_only(
+    nc_data: Dataset,
+    source: Path,
+    save_directory: Path,
+    version: str | None = None,
+    mode: str = "Uncorrected",
+    figure_dpi: int = DFLT_RES,
+    dark_mode: bool = False,
+    south_inverted: bool = False,
+    overwrite: bool = False,
+):
+    """
+    Plot the retrieved dB fields for each MEM in two formats, along with their estimated
+    errors. Errors for individual dBs are calculated from the derived covariance values.
+
+    Args:
+
+    Returns:
+        None
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    # Collate netcdf data for all spacecraft and orbits on the selected day and orbit.
+
+    # Get time data (strings) and convert to datetime objects.
+    # L2 files are already broken up into discrete science passes.
+    # if len(nc_data["Time/time_utc"]) == 0:
+    try:
+        time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
+    except Exception as exc:
+        logger.error(f"Exception encountered: {exc}")
+        logger.error("Processing skipped--truncated or corrupted data file?")
+        logger.error(f"Problem file (datetime values): {source.as_posix()}")
+        return
+    t_stamp = time_utc[0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][0]
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+
+    # FIXME: Attempt to trim slewing observations at start and finish
+    # if len(time_utc) > 12:
+    #     use_obs = np.s_[5:-5]
+    # else:
+    #     use_obs = np.s_[:]
+    use_obs = np.s_[:]  # See how things look without the haircut now
+
+    # Define smoothing parameters for curve to be overlain on (noisy) dB plots.
+    max_win = len(time_utc[use_obs])
+    ave_win = min(AVERAGING_WINDOW, max_win)
+
+    # Extract MEM retrieved dBs, geolocation and magnetic coordinates, covariance fields
+    if mode.lower() == "corrected":
+        mem_dbd_val = [
+            f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS
+        ]
+        plot_type = "retrieved_b_fields_dBs"
+    else:
+        mem_dbd_val = [
+            f"RetrievedParameters/{mode.lower()}_retrieved_dbgeod{mm}"
+            for mm in MEM_NUMBERS
+        ]
+        plot_type = f"retrieved_{mode.lower()}_b_fields_dBs"
+
+    ftgt: Path = save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        name_only=True,
+    )
+    logger.debug(f"Checked file: {ftgt.as_posix()}")
+    if ftgt.exists() and not overwrite:
+        logger.info(f"File exists, skipping: {ftgt.as_posix()}")
+        return
+
+    mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
+    mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
+    mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
+    mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
+    mem_mag_LTm = [f"MagneticCoords/obs_magLT{mm}" for mm in MEM_NUMBERS]
+
+    # Stack MEM arrays so we can index and loop through them by number rather than using
+    # 4 separate variable names.
+    # FIXME - kludge to use old L2 file - comment out line below
+    mem_dbd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbd_val],))
+    mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
+    mag_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_lat],))
+    mag_ltm = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_LTm],))
+    obs_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lat],))
+    obs_lon = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lon],))
+
+    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+        missing_val = mem_dbd[mem_ndx, :] == NCDF_MISSING
+        mem_dbd[mem_ndx, missing_val] = np.nan
+        mag_lat[mem_ndx, missing_val] = np.nan
+        mag_ltm[mem_ndx, missing_val] = np.nan
+        obs_lat[mem_ndx, missing_val] = np.nan
+        obs_lon[mem_ndx, missing_val] = np.nan
+
+    valid_pnts = np.sum(~np.isnan(mem_dbd[0, :]))
+    if valid_pnts < 3:
+        logger.debug(~np.isnan(mem_dbd[0, :]))
+        logger.error(
+            f"Insufficient non-NaN samples to plot, skipping: {source.as_posix()}"
+        )
+        return
+
+    # Plot magnetic field reference values and deltas from EZIE OSSE retrieval along
+    # EZIE MEM lines of sight.
+    logger.info("Generating plot of retrieved B field dBs")
+    nrows, ncols = NUM_MEM + 1, 2
+
+    # use = np.full_like(time_utc[:], fill_value=True, dtype=bool)
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=DEFAULT_FIG_SIZE,
+        sharex=True,
+        sharey=False,
+        squeeze=False,
+    )
+
+    # Hide all axes on RHS - we'll add "special" axes manually there.
+    for row in range(nrows):
+        axs[row, 1].set_visible(False)
+
+    # We'll save the total variable range for each field component across
+    # all MEMs here, adjusting plot limits afterwards when we know what the
+    # correct range is for the whole ensemble.
+    b_rng = np.full((2), fill_value=np.nan)  # 4 B x [min,max]
+
+    col = 0
+    axs[-1, 1].set_visible(False)
+    lat_axs = axs[-1, col]
+    lat_axs.grid(axis="both")
+    lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
+    lat_axs.set_xlabel("Time (UTC)", weight="bold")
+    mlt_axs = lat_axs.twinx()
+    mlt_axs.set_ylim(-0.5, 24.5)
+    mlt_axs.set_yticks(range(0, 25, 6))
+    mlt_lbl = [
+        "Midnight",
+        "Dawn",
+        "Noon",
+        "Dusk",
+        "Midnight",
+    ]
+    mlt_axs.set_yticklabels(mlt_lbl, size="x-small")
+    mlt_axs.set_ylabel("Magnetic Local Time\n(APEX, hours)", weight="bold")
+    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+        row = PLT_NDX[mem_ndx]
+        mem_axs = axs[row, col]
+        lat_axs.plot(
+            time_utc[use_obs],
+            mag_lat[mem_ndx, use_obs],
+            color=MEM_CLR[mem_ndx],
+            linestyle="solid",
+        )
+        mlt_axs.plot(
+            time_utc[use_obs],
+            mag_ltm[mem_ndx, use_obs],
+            color=MEM_CLR[mem_ndx],
+            linestyle="dotted",
+        )
+        mem_axs.errorbar(
+            time_utc[use_obs],
+            mem_dbd[mem_ndx][use_obs],
+            yerr=np.sqrt(mem_cdd[mem_ndx][use_obs]),
+            color=MEM_CLR[mem_ndx],
+            linestyle="solid",
+            errorevery=5,
+        )
+        mem_axs.plot(
+            time_utc[use_obs],
+            moving_average(mem_dbd[mem_ndx][use_obs], ave_win),
+            color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+            linestyle="solid",
+            lw=1.0,
+            zorder=3,
+        )
+        try:
+            b_rng[0] = np.nanmin(
+                list(b_rng[0:1])
+                + list(mem_dbd[mem_ndx][use_obs] - np.sqrt(mem_cdd[mem_ndx][use_obs]))
+            )
+            b_rng[1] = np.nanmax(
+                list(b_rng[1:2])
+                + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
+            )
+        except Exception as exc:
+            mem_axs.set_ylim((-1.0, +1.0))
+            logger.error(f"Exception while attempting to save axis y range: {exc}")
+            logger.error(f"Problem file (axis range): {source.as_posix()}")
+            # plt.close(fig)
+            return
+
+        mem_axs.grid(axis="both")
+        mem_axs.axhline(0, ls="dotted", color="black")
+
+        # Place label with receiver number at top of each column
+        mem_axs.set_ylabel(f"MEM {mem_num} dB$_\\mathbf{{D}}$ (nT)", weight="bold")
+        mem_axs.text(
+            0.01,
+            0.99,
+            f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}"
+            r"º",
+            weight="bold",
+            size="medium",
+            va="top",
+            ha="left",
+            transform=mem_axs.transAxes,
+        )
+
+        # Label only leftmost column y axis
+        if col == 0 and row == 0:
+            mem_axs.set_title(
+                (
+                    "Retrieved Current-Induced "
+                    f"B$_\\mathbf{{{REFERENCE_ALTITUDE_KM}\\ km}}$"
+                    " Field Vectors (nT)"
+                ),
+                weight="bold",
+                size="medium",
+            )
+
+    # Adjust axis y limits to be uniform for a given field component across all MEMs
+    for mem_ndx in [x - 1 for x in MEM_NUMBERS]:
+        mem_axs = axs[PLT_NDX[mem_ndx], col]
+        tot_rng = b_rng[1] - b_rng[0]
+        logger.debug(f"{b_rng[0]} : {b_rng[1]}")
+        # FIXME - kludge to use old L2 file - comment out line below
+        try:
+            mem_axs.set_ylim(
+                b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
+            )
+        except Exception as exc:
+            mem_axs.set_ylim((-1.0, +1.0))
+            logger.error(f"Exception while attempting to set axes y limits: {exc}")
+            logger.error(f"Problem file (data range): {source.as_posix()}")
+            # plt.close(fig)
+            return
+
+    # Debugging bazillion-tick failures (when only a single non-NaN value is plotted?)
+    # logger.info("Adding time (x axis) tick labels...")
+    # logger.info(f"Start and stop times (UTC) are {time_utc[0]} - {time_utc[-1]}")
+    # logger.info(f"Start+1 and stop-1 times (UTC) are {time_utc[1]} - {time_utc[-2]}")
+    # logger.info(f"Length of time array is {len(time_utc)}")
+    # if (time_utc[-1] - time_utc[0]).total_seconds() < 120:
+    #     logger.info(f"{mem_dbd[0, :]}")
+    #     logger.info(f"{np.sum(~np.isnan(mem_dbd[0, :]))}")
+
+    # Format x-axis to show only hours and minutes unless sample is shorter than 120
+    # seconds. Label only bottom row left time/x axis.
+    set_xaxis_tick_format(
+        axs[-1, 0],
+        max_ticks=20 // ncols + 1,
+        use_seconds=(time_utc[-1] - time_utc[0]).total_seconds() < 120,
+    )
+
+    # NEW geomagnetic coordinate map inset
+    midpt = len(time_utc) // 2
+    lat_at_midpt = nc_data["Geolocation/sat_lat"][midpt]
+    lon_at_midpt = nc_data["Geolocation/sat_lon"][midpt]
+
+    if lat_at_midpt > +40:  # hemisphere = NORTH
+        hemisphere = NORTH
+    elif lat_at_midpt < -40:  # hemisphere = SOUTH
+        hemisphere = SOUTH
+    else:
+        hemisphere = None
+
+    if hemisphere == NORTH:
+        proj_method = ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
+    elif hemisphere == SOUTH:
+        proj_method = ccrs.SouthPolarStereo(central_longitude=180)
+        if south_inverted:
+            MLT_sign = -1
+    else:
+        proj_method = ccrs.Orthographic(
+            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
+        )
+
+    maprowspan, mapcolspan = 3, 1  # 5 rows for geographic coordinate inset
+    map_axs: GeoAxes = plt.subplot2grid(
+        (nrows, ncols),
+        (0, ncols - mapcolspan),
+        fig=fig,
+        projection=proj_method,
+        rowspan=maprowspan,
+        colspan=mapcolspan,
+    )  # ty:ignore[invalid-assignment]
+
+    if hemisphere is not None:
+        x_0, y_0 = proj_method.transform_point(
+            0,
+            90 if hemisphere == NORTH else -90,
+            src_crs=DATA_TRANSFORM,
+        )
+        x_1, y_1 = proj_method.transform_point(
+            45,
+            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+            src_crs=DATA_TRANSFORM,
+        )
+        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+        map_axs.set_extent(
+            (
+                -map_meters,
+                +map_meters,
+                -map_meters,
+                +map_meters,
+            ),
+            crs=proj_method,
+        )
+        # Compute a circle in axes coordinates that will be used as a clipping boundary
+        # for the map.
+        theta = np.linspace(0, 2 * np.pi, 100)
+        center, radius = [0.5, 0.5], 0.5
+        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+        circle = mpath.Path(verts * radius + center)
+        map_axs.set_boundary(circle, transform=map_axs.transAxes)
+
+    # Map S/C and MEM footprint lat/lon
+    dtlim = [time_utc[0], time_utc[1]]
+    duration = (dtlim[1] - dtlim[0]).total_seconds()
+    midpoint = dtlim[0] + datetime.timedelta(seconds=int(0.5 * duration))
+
+    # Get solar position, first in geodetic and then in APEX magnetic coordinates.
+    sun_geo_tuple_rad = []
+
+    # Geodetic
+    for tndx, tutc in enumerate(time_utc):
+        tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
+        (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+            "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
+        )
+        sun_geo_tuple_rad.append(
+            spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
+        )  # Fix the subsolar point on the surface in geodetic coordinates
+    sun_geo_lon_deg = np.array([np.degrees(x[0]) for x in sun_geo_tuple_rad])
+    sun_geo_lat_deg = np.array([np.degrees(x[1]) for x in sun_geo_tuple_rad])
+
+    # Compute the subsolar point in APEX magnetic coordinates
+    apex = Apex(date=midpoint.year, refh=0)
+    sun_mlat, sun_mlon = apex.geo2apex(
+        sun_geo_lat_deg,
+        sun_geo_lon_deg,
+        REFERENCE_ALTITUDE_KM,
+    )
+
+    # Compute satellite footprint in APEX magnetic coordinates
+    sat_maglat, sat_maglon = apex.geo2apex(
+        nc_data["Geolocation/sat_lat"][:],
+        nc_data["Geolocation/sat_lon"][:],
+        nc_data["Geolocation/sat_alt"][:],
+    )
+
+    # Convert magnetic longitude to MLT
+    sat_magLT_deg = 180.0 + sat_maglon - sun_mlon
+
+    # Debugging "mirrored" southern hemisphere plots
+    # logger.debug(f"{hemisphere} {lat_at_midpt}")
+    # logger.debug(f"{np.min(sun_geo_lat_deg)}, {np.max(sun_geo_lat_deg)}")
+    # logger.debug(f"{np.min(sun_geo_lon_deg)}, {np.max(sun_geo_lon_deg)}")
+    # logger.debug(
+    #     f"Sun magnetic latitude, longitude = "
+    #     f"{sun_mlat[tndx // 2]:7.2f}, "
+    #     f"{sun_mlon[tndx // 2]:7.2f}"
+    # )
+    # logger.debug(f"{np.min(sat_magLT_deg)}, {np.max(sat_magLT_deg)}")
+
+    # Transform continent outlines from geographic to APEX magnetic coordinates
+    MLT_sign = -1 if (south_inverted and hemisphere == SOUTH) else +1
+    if hemisphere is not None:
+        map_magnetic_continents(
+            ax=map_axs,
+            time4mag=midpoint,
+            sun_mlon=sun_mlon[len(sun_mlon) // 2],
+            alt4mag=REFERENCE_ALTITUDE_KM,
+            south_inverted=(south_inverted and (hemisphere == SOUTH)),
+        )
+        map_sc_mem_footprints_magnetic(
+            map_axs=map_axs,
+            sat_lat=sat_maglat,
+            sat_lon=MLT_sign * sat_magLT_deg,
+            obs_lat=mag_lat[:, :].T,
+            obs_lon=MLT_sign * mag_ltm[:, :].T * 15,  # Convert hours to degrees
+            at_time=midpoint,
+            dark_mode=False,
+            zorder=4,
+            small_text=False,
+            plain=False,
+            legend_top=False,
+            terminator=False,
+            hemisphere=hemisphere,
+            south_inverted=(south_inverted and (hemisphere == SOUTH)),
+        )
+
+    else:
+        map_sc_mem_footprints(
+            map_axs=map_axs,
+            sat_lat=nc_data["Geolocation/sat_lat"][use_obs],
+            sat_lon=nc_data["Geolocation/sat_lon"][use_obs],
+            obs_lat=obs_lat[:, use_obs].T,
+            obs_lon=obs_lon[:, use_obs].T,
+            at_time=midpoint,
+            dark_mode=False,
+            terminator=True,
+            zorder=4,
+            small_text=False,
+            plain=False,
+            legend_top=False,
+            mid_lat_mag=True,
+        )
+
+    # Add MEM beam numbering/pointing diagram at bottom right corner of figure
+    fw = fig.get_figwidth()
+    fh = fig.get_figheight()
+    fig_aspect_ratio = fw / fh
+    # ll, bb, ww, hh = map_axs.get_position().bounds
+    mem_beam_img = plt.imread(
+        Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
+    )
+    img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
+    hi = 0.29
+    wi = hi * img_aspect_ratio / fig_aspect_ratio
+    # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
+    img_axs: plt.Axes = fig.add_axes(
+        rect=(0.76 - wi / 2, 0.025 * fig_aspect_ratio, wi, hi)
+    )
+    img_axs.imshow(mem_beam_img, aspect="auto")
+    # Just turn ticks off so we get a border around image.
+    img_axs.set_xticks([])
+    img_axs.set_yticks([])
+    # img_axs.axis("off")
+
+    # Tweak position and add any figure-level annotation
+    fig_title = f"{mode} Retrieved Magnetic Field Deltas: "
+    fig_title = fig_title + (
+        f"{sc_id} - Orbit {orb_num}\n"
+        f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+        f"{time_utc[use_obs][-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
+    )
+    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+    add_pipeline_metadata(fig, nc_data)
+    overlay_ezie_logo(fig)
+    plt.subplots_adjust(
+        left=0.06,
+        right=0.99,
+        bottom=0.07,
+        top=0.91,
+        hspace=0.00,
+        wspace=0.05,
+    )
+    save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        figure=fig,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        dpi=figure_dpi,
+        dark_mode=dark_mode,
+    )
+
+
+def map_sc_mem_footprints(
+    map_axs,
+    sat_lat: np.ndarray,
+    sat_lon: np.ndarray,
+    obs_lat: np.ndarray,
+    obs_lon: np.ndarray,
+    at_time: datetime.datetime,
+    polar: bool = False,
+    terminator: bool = False,
+    dark_mode: bool = False,
+    zorder: int = 4,
+    small_text: bool = False,
+    add_title: bool = True,
+    legend_top: bool = False,
+    mid_lat_mag: bool = False,
+    plain: bool = False,
+    south_inverted: bool = False,
+):
+    """Map geolocated S/C and MEM footprints
+
+    Args:
+        map_axs (_type_, optional): _description_. Defaults to None.
+        sat_lat (np.ndarray, optional): _description_. Defaults to None.
+        sat_lon (np.ndarray, optional): _description_. Defaults to None.
+        obs_lat (np.ndarray, optional): _description_. Defaults to None.
+        obs_lon (np.ndarray, optional): _description_. Defaults to None.
+        at_time (datetime.datetime, optional): _description_. Defaults to None.
+        terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
+        dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+    """
+    map_axs.set_global()
+    map_axs.add_feature(
+        cfeature.OCEAN,
+        alpha=1.0 if dark_mode else 0.3,
+        facecolor="#305080" if dark_mode else "#60A0F0",
+    )
+    map_axs.add_feature(
+        cfeature.LAND,
+        alpha=0.7 if dark_mode else 0.3,
+        facecolor="#d0c0a0" if dark_mode else "#d0c0a0",
+    )
+
+    gl = map_axs.gridlines(
+        draw_labels=True,
+        x_inline=True,  # FIXME
+        xlocs=range(-180, 180, 30),
+        ylocs=range(-90, 91, 15),
+        color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+    )
+    gl.xlabel_style = {
+        "size": "xx-small" if small_text else "x-small",
+        "color": "black" if not dark_mode else DARK_MODE_TEXT_COLOR,
+    }
+    gl.ylabel_style = {
+        "size": "xx-small" if small_text else "x-small",
+        "color": "black" if not dark_mode else DARK_MODE_TEXT_COLOR,
+    }
+    if mid_lat_mag:
+        plot_geomagnetic_references(
+            ax=map_axs,
+            at_time=at_time,
+            latitudes=[
+                -30,
+                -20,
+                -10,
+                +10,
+                +20,
+                +30,
+            ],
+            lat_clr="#a03030",
+        )
+        plot_geomagnetic_references(
+            ax=map_axs,
+            at_time=at_time,
+            latitudes=[0],
+            ls="-",
+            lat_clr="#a03030",
+        )
+    else:
+        plot_geomagnetic_references(
+            ax=map_axs,
+            at_time=at_time,
+            latitudes=[
+                -80,
+                -70,
+                -60,
+                -50,
+                0,
+                +50,
+                +60,
+                +70,
+                +80,
+            ],
+            lat_clr="#a03030",
+        )
+
+    if terminator:
+        # Take difference from noon or midnight and flip sign to make this work when
+        # plotting with south_inverted set
+        noon = at_time.replace(hour=12, minute=0, second=0)
+        noon_delt = noon - at_time
+        at_time_inverted = noon + noon_delt
+        map_axs.add_feature(
+            Nightshade(
+                at_time if not south_inverted else at_time_inverted,
+                alpha=TERMINATOR_ALPHA,
+                color=TERMINATOR_COLOR,
+                zorder=2,
+            )
+        )
+
+    # FIXME: We might need to adjust these algorithmicallly based on the time spacing of
+    # the L0A points
+    # mew, mkevry = 0.6, 2  # for "sparse" files
+    mew, mkevry = 0.9, 10  # for "dense" files
+    map_kws = {
+        "transform": ccrs.PlateCarree(),
+        "ls": "none",
+        "ms": 4,
+        "mfc": "none",
+        "mew": mew,
+        "markevery": mkevry,
+    }  # Same for S/C and all MEMs
+
+    # MEM lat/lon from L0A file
+    if not plain:
+        for mm, mem in enumerate(MEM_NUMBERS):
+            mem_kws = {
+                "marker": MEM_SYMS[mm],
+                "color": MEM_CLR[mm],  # MEM_CB_CLR[mm],
+                "label": f"MEM {mem}",
+                "zorder": zorder + 1,  # Always place ABOVE spacecraft footprint
+            }  # MEM-specific
+            map_axs.plot(obs_lon[:, mm], obs_lat[:, mm], **(map_kws | mem_kws))
+
+    # S/C lat/lon from L0A file
+    sat_kws = {
+        "marker": "d",
+        "ms": 2,
+        "color": SAT_COL if dark_mode else "black",
+        "label": "SV Ground Track",
+        # "label": "L0A - EARTHLOOK or SKYLOOK",
+        "zorder": zorder,
+    }  # S/C-specific
+    map_axs.plot(sat_lon, sat_lat, **(map_kws | sat_kws))
+
+    # Add map annotation
+    ncols = 3  # if not polar else 1
+    fontsize = "xx-small" if small_text else "x-small"
+    if not plain:
+        if legend_top:
+            # loc = "upper right"  # if not polar else "lower left"
+            # bbta = (1.04, -0.05)  # if not polar else (1.05, 0.05)
+            loc = "lower right"
+            bbta = (0.50, +1.02)
+        else:
+            loc = "upper right"
+            bbta = (0.50, -0.05)
+        map_axs.legend(
+            loc=loc, ncols=ncols, fontsize=fontsize, markerscale=2, bbox_to_anchor=bbta
+        )
+    if add_title:
+        map_axs.set_title(
+            "Geolocated Spacecraft and MEM Footprints",
+            size="small" if small_text else "medium",
+            pad=12,
+        )
+
+
+def map_sc_mem_footprints_magnetic(
+    map_axs,
+    sat_lat: np.ndarray,
+    sat_lon: np.ndarray,
+    obs_lat: np.ndarray,
+    obs_lon: np.ndarray,
+    at_time: datetime.datetime,
+    hemisphere: str | None = None,
+    dark_mode: bool = False,
+    zorder: int = 4,
+    small_text: bool = False,
+    legend_top: bool = False,
+    geo_labels: bool = False,
+    geo_offset: float = 0.0,
+    terminator: bool = False,
+    plain: bool = False,
+    south_inverted: bool = False,
+):
+    """Map geolocated S/C and MEM footprints
+
+    Args:
+        map_axs (_type_, optional): _description_. Defaults to None.
+        sat_lat (np.ndarray, optional): _description_. Defaults to None.
+        sat_lon (np.ndarray, optional): _description_. Defaults to None.
+        obs_lat (np.ndarray, optional): _description_. Defaults to None.
+        obs_lon (np.ndarray, optional): _description_. Defaults to None.
+        at_time (datetime.datetime, optional): _description_. Defaults to None.
+        terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
+        dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+    """
+    if (hemisphere is None) or (hemisphere == NORTH) or south_inverted:
+        ccw = +1
+    else:
+        ccw = -1
+    lats_n = np.arange(
+        MAG_LAT_LOWER_LIMIT, 90.0, 10.0
+    )  # Lats at which to draw gridlines
+
+    if south_inverted:
+        cardinal_labels = dict(south="N", north="S")
+    else:
+        cardinal_labels = dict(south="S", north="N")
+
+    lon_delta = 30.0
+    gl = map_axs.gridlines(
+        draw_labels=True,
+        x_inline=False,
+        xlocs=np.arange(-180.0, 180.0, lon_delta),
+        y_inline=True,
+        ylocs=lats_n if hemisphere == NORTH else [-1 * lat for lat in lats_n],
+        color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+    )
+    if False:  # Not supported for non-rectangular projections =(
+        lat_formatter = LatitudeFormatter(cardinal_labels=cardinal_labels)
+        map_axs.yaxis.set_major_formatter(lat_formatter)
+
+    # gl.ylabel_style = {
+    #     "size": 1,
+    #     "zorder": 0,
+    #     "color": "white" if not dark_mode else DARK_MODE_FACE_COLOR,
+    # }  # Suppress latitude labels
+
+    if not geo_labels:
+        # Add labels in MLT to the polar stereographic plot, with noon at top
+        gl.xlabel_style = {
+            "size": 1,
+            "zorder": 0,
+            "color": "white" if not dark_mode else DARK_MODE_FACE_COLOR,
+        }  # Suppress longitudes, we'll add MLT ourselves
+        mlt_locs = np.arange(0, 360.0, lon_delta)
+        mlt_desc = {}
+        for mm, mlt in enumerate(mlt_locs):
+            mlt_desc[f"{mlt:.0f}"] = f"{mlt / 15:02.0f}H"
+        mlt_desc["0"] = "Midnight"
+        mlt_desc["90"] = "Dawn"
+        mlt_desc["180"] = "Noon"
+        mlt_desc["270"] = "Dusk"
+        for mm, mlt in enumerate(mlt_locs):
+            mlt_pos = (ccw * mlt - 90.0) % 360.0  # Rotate to coord sys with 0 at x axis
+            x = 0.5 + 0.55 * np.cos(np.radians(mlt_pos))
+            y = 0.5 + 0.55 * np.sin(np.radians(mlt_pos))
+            map_axs.text(
+                x,
+                y,
+                mlt_desc[f"{mlt:.0f}"],
+                transform=map_axs.transAxes,
+                color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                va="center",
+                horizontalalignment="center",
+            )
+    elif geo_labels and not (south_inverted and (hemisphere == SOUTH)):
+        gl.xlabel_style = {"size": "small", "zorder": 5}
+    else:
+        gl.xlabel_style = {
+            "size": 1,
+            "zorder": 0,
+            "color": "white" if not dark_mode else DARK_MODE_FACE_COLOR,
+        }  # Suppress longitudes, we'll add MLT ourselves
+        mlt_locs = np.arange(-180, 180.0, lon_delta)
+        mlt_desc = {}
+        for mm, mlt in enumerate(mlt_locs):
+            mlt_desc[f"{mlt:.0f}"] = f"{mlt:.0f}" + r"$^\circ$"
+        for mm, mlt in enumerate(mlt_locs):
+            # Rotate positions to align with coord sys central longitude definition
+            mlt_pos = (ccw * mlt + 90.0 + geo_offset) % 360.0
+            x = 0.5 + 0.55 * np.cos(np.radians(mlt_pos))
+            y = 0.5 + 0.55 * np.sin(np.radians(mlt_pos))
+            map_axs.text(
+                x,
+                y,
+                mlt_desc[f"{mlt:.0f}"],
+                transform=map_axs.transAxes,
+                color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
+                va="center",
+                horizontalalignment="center",
+            )
+
+    # FIXME: We might need to adjust these algorithmicallly based on the time spacing of
+    # the L0A points
+    # mew, mkevry = 0.6, 2  # for "sparse" files
+    mew, mkevry = 0.9, 10  # for "dense" files
+    map_kws = {
+        "transform": ccrs.PlateCarree(),
+        "ls": "none",
+        "ms": 4,
+        "mfc": "none",
+        "mew": mew,
+        "markevery": mkevry,
+    }  # Same for S/C and all MEMs
+
+    # MEM lat/lon from L0A file
+    if not plain:
+        for mm, mem in enumerate(MEM_NUMBERS):
+            mem_kws = {
+                "marker": MEM_SYMS[mm],
+                "color": MEM_CLR[mm],  # MEM_CB_CLR[mm],
+                "label": f"MEM {mem}",
+                "zorder": zorder + 1,  # Always place ABOVE spacecraft footprint
+            }  # MEM-specific
+            map_axs.plot(obs_lon[:, mm], obs_lat[:, mm], **(map_kws | mem_kws))
+
+    # S/C lat/lon from L0A file
+    sat_kws = {
+        "marker": "d",
+        "ms": 2,
+        "color": SAT_COL if dark_mode else "black",
+        "label": "SV Ground Track",
+        # "label": "L0A - EARTHLOOK or SKYLOOK",
+        "zorder": zorder,
+    }  # S/C-specific
+    map_axs.plot(sat_lon, sat_lat, **(map_kws | sat_kws))
+
+    if terminator:
+        map_axs.add_feature(
+            Nightshade(
+                at_time,
+                alpha=TERMINATOR_ALPHA,
+                color=TERMINATOR_COLOR,
+                zorder=2,
+            )
+        )
+
+    # Add map annotation
+    ncols = 3  # if not polar else 1
+    fontsize = "xx-small" if small_text else "x-small"
+    if not plain:
+        if legend_top:
+            # loc = "upper right"  # if not polar else "lower left"
+            # bbta = (1.04, -0.05)  # if not polar else (1.05, 0.05)
+            loc = "lower right"
+            bbta = (0.50, +1.02)
+        else:
+            loc = "upper right"
+            bbta = (0.50, -0.06)
+        map_axs.legend(
+            loc=loc, ncols=ncols, fontsize=fontsize, markerscale=2, bbox_to_anchor=bbta
+        )
+
+
+def plot_mag_and_geo_maps(
+    nc_data: Dataset,
+    source: Path,
+    save_directory: Path,
+    figure_dpi: int = 300,
+    dark_mode: bool = False,
+    south_inverted: bool = False,
+    overwrite: bool = False,
+):
+    """
+    Purpose:
+
+    Args:
+
+    Returns:
+        None
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+    try:
+        time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
+    except Exception as exc:
+        logger.error(f"Exception encountered: {exc}")
+        logger.error("Processing skipped--truncated or corrupted data file?")
+        logger.error(f"Problem file (datetime values): {source.as_posix()}")
+        return
+
+    t_stamp = time_utc[0].strftime("%H%M%S")
+    orb_num = nc_data["Science/orbit_number"][0]
+    sc_id = nc_data["Metadata/SpaceVehicle"][0]
+
+    # FIXME: Attempt to trim slewing observations at start and finish
+    # if len(time_utc) > 12:
+    #     use_obs = np.s_[5:-5]
+    # else:
+    use_obs = np.s_[:]
+
+    plot_type = "mag_and_geo_maps"
+    ftgt: Path = save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        name_only=True,
+    )
+    logger.debug(f"Checked file: {ftgt.as_posix()}")
+    if ftgt.exists() and not overwrite:
+        logger.info(f"File exists, skipping: {ftgt.as_posix()}")
+        return
+    logger.info("Generating plot of MEM and spacecraft footprints, geo and mag coords")
+
+    mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
+    mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
+    mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
+    mem_mag_LTm = [f"MagneticCoords/obs_magLT{mm}" for mm in MEM_NUMBERS]
+
+    # Stack MEM arrays so we can index and loop through them by number rather than using
+    # 4 separate variable names.
+    mag_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_lat],))
+    mag_ltm = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_LTm],))
+    obs_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lat],))
+    obs_lon = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lon],))
+
+    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+        missing_val = obs_lat[mem_ndx, :] == NCDF_MISSING
+        mag_lat[mem_ndx, missing_val] = np.nan
+        mag_ltm[mem_ndx, missing_val] = np.nan
+        obs_lat[mem_ndx, missing_val] = np.nan
+        obs_lon[mem_ndx, missing_val] = np.nan
+
+    # Plot magnetic field reference values and deltas from EZIE OSSE retrieval along
+    # EZIE MEM lines of sight.
+    nrows, ncols = NUM_MEM + 1, 2
+
+    # use = np.full_like(time_utc[:], fill_value=True, dtype=bool)
+    fig, axs = plt.subplots(
+        nrows,
+        ncols,
+        figsize=DEFAULT_FIG_SIZE,
+        sharex=True,
+        sharey=False,
+        squeeze=False,
+    )
+
+    # Hide all axes on RHS - we'll add "special" axes manually there.
+    for col in range(ncols):
+        for row in range(nrows):
+            axs[row, col].set_visible(False)
+
+    col = 0
+    axs[-1, col].set_visible(True)
+    lat_axs = axs[-1, col]
+    lat_axs.grid(axis="both")
+    lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
+    lat_axs.set_xlabel("Time (UTC)", weight="bold")
+    mlt_axs = lat_axs.twinx()
+    mlt_axs.set_ylim(-0.5, 24.5)
+    mlt_axs.set_yticks(range(0, 25, 6))
+    mlt_lbl = [
+        "Midnight",
+        "Dawn",
+        "Noon",
+        "Dusk",
+        "Midnight",
+    ]
+    mlt_axs.set_yticklabels(mlt_lbl, size="x-small")
+    mlt_axs.set_ylabel("Magnetic Local Time\n(APEX, hours)", weight="bold")
+    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
+        row = PLT_NDX[mem_ndx]
+        mem_axs = axs[row, col]
+        lat_axs.plot(
+            time_utc[use_obs],
+            mag_lat[mem_ndx, use_obs],
+            color=MEM_CLR[mem_ndx],
+            linestyle="solid",
+        )
+        mlt_axs.plot(
+            time_utc[use_obs],
+            mag_ltm[mem_ndx, use_obs],
+            color=MEM_CLR[mem_ndx],
+            linestyle="dotted",
+        )
+
+        mem_axs.grid(axis="both")
+        mem_axs.axhline(0, ls="dotted", color="black")
+
+        # Place label with receiver number at top of each column
+        mem_axs.set_ylabel(f"MEM {mem_num} dB$_\\mathbf{{D}}$ (nT)", weight="bold")
+        mem_axs.text(
+            0.01,
+            0.99,
+            f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}"
+            r"º",
+            weight="bold",
+            size="medium",
+            va="top",
+            ha="left",
+            transform=mem_axs.transAxes,
+        )
+
+        # Label only leftmost column y axis
+        if col == 0 and row == 0:
+            mem_axs.set_title(
+                "MEM and SV footprint locations",
+                weight="bold",
+                size="medium",
+            )
+
+    # Adjust axis y limits to be uniform for a given field component across all MEMs
+    for mem_ndx in [x - 1 for x in MEM_NUMBERS]:
+        mem_axs = axs[PLT_NDX[mem_ndx], col]
+
+    # Format the x-axis to show only hours and minutes
+    # Label only bottom row left time/x axis
+    set_xaxis_tick_format(
+        axs[-1, 0],
+        max_ticks=20 // ncols + 1,
+        rotation=45,
+        use_seconds=(time_utc[-1] - time_utc[0]).total_seconds() < 120,
+    )
+
+    # NEW geomagnetic coordinate map inset
+    midpt = len(time_utc) // 2
+    lat_at_midpt = nc_data["Geolocation/sat_lat"][midpt]
+    lon_at_midpt = nc_data["Geolocation/sat_lon"][midpt]
+
+    # Map S/C and MEM footprint lat/lon
+    dtlim = [time_utc[0], time_utc[1]]
+    duration = (dtlim[1] - dtlim[0]).total_seconds()
+    midpoint = dtlim[0] + datetime.timedelta(seconds=int(0.5 * duration))
+
+    # Add magnetic coordinate overlay, select latitudes at which to draw gridlines
+    if lat_at_midpt > +40:  # hemisphere = NORTH
+        hemisphere = NORTH
+        lats_p = np.arange(+MAG_LAT_LOWER_LIMIT, +81.0, +10.0)
+    elif lat_at_midpt < -40:  # hemisphere = SOUTH
+        hemisphere = SOUTH
+        lats_p = np.arange(-MAG_LAT_LOWER_LIMIT, -81.0, -10.0)
+    else:
+        hemisphere = None
+        lats_p = np.array([-20.0, -10.0, +10.0, +20.0])
+
+    # Get solar position, first in geodetic and then in APEX magnetic coordinates.
+    sun_geo_tuple_rad = []
+
+    # Geodetic
+    for tndx, tutc in enumerate(time_utc):
+        tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
+        (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+            "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
+        )
+        sun_geo_tuple_rad.append(
+            spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
+        )  # Fix the subsolar point on the surface in geodetic coordinates
+    sun_geo_lat_deg = np.array([np.degrees(x[1]) for x in sun_geo_tuple_rad])
+    sun_geo_lon_deg = np.array([np.degrees(x[0]) for x in sun_geo_tuple_rad])
+    sun_geo_lat_mid = sun_geo_lat_deg[sun_geo_lat_deg.shape[0] // 2]
+    sun_geo_lon_mid = sun_geo_lon_deg[sun_geo_lon_deg.shape[0] // 2]
+
+    apex = Apex(date=midpoint.year, refh=0)
+    sun_mlat, sun_mlon = apex.geo2apex(
+        sun_geo_lat_deg,
+        sun_geo_lon_deg,
+        REFERENCE_ALTITUDE_KM,
+    )  # Compute the subsolar point in APEX magnetic coordinates
+    sun_mag_lat_mid = sun_mlat[sun_mlat.shape[0] // 2]
+    sun_mag_lon_mid = sun_mlon[sun_mlon.shape[0] // 2]
+
+    # Compute satellite footprint in APEX magnetic coordinates
+    sat_maglat, sat_maglon = apex.geo2apex(
+        nc_data["Geolocation/sat_lat"][:],
+        nc_data["Geolocation/sat_lon"][:],
+        nc_data["Geolocation/sat_alt"][:],
+    )
+
+    # Convert magnetic longitude to MLT
+    sat_magLT_deg = 180.0 + sat_maglon - sun_mlon
+
+    # Debugging "mirrored" southern hemisphere plots
+    logger.debug(f"{hemisphere} {lat_at_midpt}")
+    logger.debug(f"{np.min(sun_geo_lat_deg)}, {np.max(sun_geo_lat_deg)}")
+    logger.debug(f"{np.min(sun_geo_lon_deg)}, {np.max(sun_geo_lon_deg)}")
+    logger.info(f"Hemisphere is {hemisphere}")
+    logger.info(
+        f"Sun geodetic latitude, longitude = "
+        f"{sun_geo_lat_mid:7.2f}, "
+        f"{sun_geo_lon_mid:7.2f}"
+    )
+    logger.info(
+        f"Sun magnetic latitude, longitude = "
+        f"{sun_mag_lat_mid:7.2f}, "
+        f"{sun_mag_lon_mid:7.2f}"
+    )
+    logger.debug(f"{np.min(sat_magLT_deg)}, {np.max(sat_magLT_deg)}")
+
+    # NEW geomagnetic coordinate map inset
+    MLT_sign = +1
+    if hemisphere == NORTH:
+        proj_method_mag = ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
+        proj_method_geo = ccrs.NorthPolarStereo(central_longitude=sun_geo_lon_mid + 180)
+    elif hemisphere == SOUTH:
+        if south_inverted:
+            MLT_sign = -1
+        proj_method_mag = ccrs.SouthPolarStereo(central_longitude=180)
+        proj_method_geo = ccrs.SouthPolarStereo(
+            central_longitude=MLT_sign * sun_geo_lon_mid
+        )
+    else:
+        proj_method_mag = ccrs.Orthographic(
+            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
+        )
+        proj_method_geo = ccrs.Orthographic(
+            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
+        )
+
+    maprowspan, mapcolspan = 3, 1  # 5 rows for geographic coordinate inset
+    geo_axs: GeoAxes = plt.subplot2grid(
+        (nrows, ncols),
+        (0, 0),
+        fig=fig,
+        projection=proj_method_geo,
+        rowspan=maprowspan,
+        colspan=mapcolspan,
+    )  # ty:ignore[invalid-assignment]
+
+    if hemisphere is not None:
+        x_0, y_0 = proj_method_geo.transform_point(
+            0,
+            90 if hemisphere == NORTH else -90,
+            src_crs=DATA_TRANSFORM,
+        )
+        x_1, y_1 = proj_method_geo.transform_point(
+            45,
+            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+            src_crs=DATA_TRANSFORM,
+        )
+        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+        geo_axs.set_extent(
+            (
+                -map_meters,
+                +map_meters,
+                -map_meters,
+                +map_meters,
+            ),
+            crs=proj_method_geo,
+        )
+
+        # Compute a circle in axes coordinates that will be used as a clipping boundary
+        # for the map.
+        theta = np.linspace(0, 2 * np.pi, 100)
+        center, radius = [0.5, 0.5], 0.5
+        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+        circle = mpath.Path(verts * radius + center)
+        geo_axs.set_boundary(circle, transform=geo_axs.transAxes)
+
+        logger.info("Mapping continents in reversed longitude coordinates")
+        if south_inverted:
+            map_inverted_continents(
+                ax=geo_axs,
+            )
+        map_sc_mem_footprints_magnetic(
+            map_axs=geo_axs,
+            sat_lat=nc_data["Geolocation/sat_lat"][use_obs],
+            sat_lon=MLT_sign * nc_data["Geolocation/sat_lon"][use_obs],
+            obs_lat=obs_lat[:, use_obs].T,
+            obs_lon=MLT_sign * obs_lon[:, use_obs].T,
+            at_time=midpoint,
+            dark_mode=False,
+            zorder=4,
+            small_text=False,
+            plain=False,
+            geo_labels=True,
+            geo_offset=MLT_sign * sun_geo_lon_mid,
+            legend_top=False,
+            hemisphere=hemisphere,
+            south_inverted=(south_inverted and (hemisphere == SOUTH)),
+        )
+        plot_geomagnetic_references(
+            geo_axs,
+            midpoint,
+            latitudes=lats_p,
+            south_inverted=south_inverted,
+            lat_clr="red" if not dark_mode else DARK_MODE_GRID_COLOR,
+        )
+
+    # =================================================================================
+    # fig.autofmt_xdate()
+    # plt.subplots_adjust(
+    #     left=0.06,
+    #     right=0.99,
+    #     bottom=0.10,
+    #     top=0.91,
+    #     hspace=0.00,
+    #     wspace=0.05,
+    # )
+    # save_close_figure(
+    #     source=source,
+    #     save_directory=save_directory,
+    #     figure=fig,
+    #     obs_date=obs_date,
+    #     spacecraft=sc_id,
+    #     # orbit=orb_num,
+    #     tstmp=t_stamp,
+    #     plot_type=plot_type,
+    #     dpi=300,
+    # )
+    # return
+    # =================================================================================
+
+    maprowspan, mapcolspan = 3, 1  # 5 rows for geographic coordinate inset
+    mag_axs: GeoAxes = plt.subplot2grid(
+        shape=(nrows, ncols),
+        loc=(0, ncols - mapcolspan),
+        fig=fig,
+        projection=proj_method_mag,
+        rowspan=maprowspan,
+        colspan=mapcolspan,
+    )  # ty:ignore[invalid-assignment]
+
+    # logger.info("Adding geographic coordinate SZA overlay")
+    # sza_overlay(
+    #     geo_axs,
+    #     MLT_sign,
+    #     np.radians(sun_geo_lat_mid),
+    #     np.radians(sun_geo_lon_mid),
+    # )
+    # logger.info("Adding APEX magnetic coordinate SZA overlay")
+    # sza_overlay(
+    #     mag_axs,
+    #     MLT_sign,
+    #     np.radians(sun_geo_lat_mid),
+    #     np.radians(sun_geo_lon_mid),
+    #     sun_mlon_deg=sun_mag_lon_mid,
+    #     time4mag=midpoint,
+    #     magnetic=True,
+    # )
+
+    if hemisphere is not None:
+        # if (hemisphere == NORTH) or south_inverted:
+        #     mag_axs.set_extent(
+        #         extents=[-180, 180, MAG_LAT_LOWER_LIMIT, +90], crs=DATA_TRANSFORM
+        #     )
+        # else:
+        #     mag_axs.set_extent(
+        #         extents=[-180, 180, -90, -MAG_LAT_LOWER_LIMIT], crs=DATA_TRANSFORM
+        #     )
+
+        x_0, y_0 = proj_method_mag.transform_point(
+            0,
+            90 if hemisphere == NORTH else -90,
+            src_crs=DATA_TRANSFORM,
+        )
+        x_1, y_1 = proj_method_mag.transform_point(
+            45,
+            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+            src_crs=DATA_TRANSFORM,
+        )
+        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+        mag_axs.set_extent(
+            (
+                -map_meters,
+                +map_meters,
+                -map_meters,
+                +map_meters,
+            ),
+            crs=proj_method_mag,
+        )
+
+        # Compute a circle in axes coordinates that will be used as a clipping boundary
+        # for the map.
+        theta = np.linspace(0, 2 * np.pi, 100)
+        center, radius = [0.5, 0.5], 0.5
+        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+        circle = mpath.Path(verts * radius + center)
+        mag_axs.set_boundary(circle, transform=mag_axs.transAxes)
+
+    # Transform continent outlines from geographic to APEX magnetic coordinates
+    if hemisphere is not None:
+        logger.info("Mapping continents in APEX magnetic coordinates")
+        map_magnetic_continents(
+            ax=mag_axs,
+            time4mag=midpoint,
+            sun_mlon=sun_mlon[len(sun_mlon) // 2],
+            alt4mag=REFERENCE_ALTITUDE_KM,
+            south_inverted=(south_inverted and (hemisphere == SOUTH)),
+        )
+        map_sc_mem_footprints_magnetic(
+            map_axs=mag_axs,
+            sat_lat=sat_maglat,
+            sat_lon=MLT_sign * sat_magLT_deg,
+            obs_lat=mag_lat[:, :].T,
+            obs_lon=MLT_sign * mag_ltm[:, :].T * 15,  # Convert hours to degrees
+            at_time=midpoint,
+            dark_mode=False,
+            zorder=4,
+            small_text=False,
+            plain=False,
+            legend_top=False,
+            hemisphere=hemisphere,
+            south_inverted=(south_inverted and (hemisphere == SOUTH)),
+        )
+
+    # Add MEM beam numbering/pointing diagram at bottom right corner of figure
+    fw = fig.get_figwidth()
+    fh = fig.get_figheight()
+    fig_aspect_ratio = fw / fh
+    mem_beam_img = plt.imread(
+        Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
+    )
+    img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
+    hi = 0.31
+    wi = hi * img_aspect_ratio / fig_aspect_ratio
+    # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
+    img_axs = fig.add_axes(rect=(0.76 - wi / 2, 0.025 * fig_aspect_ratio, wi, hi))
+    img_axs.imshow(mem_beam_img, aspect="auto")
+    # Just turn ticks off so we get a border around image, not entire axis.
+    # img_axs.axis("off")
+    img_axs.set_xticks([])
+    img_axs.set_yticks([])
+
+    # Tweak position and add any figure-level annotation
+    fig_title = (
+        "Spacecraft and MEM Footprints, Geographic (L) and Magnetic (R) Coordinates - "
+    )
+    fig_title = fig_title + (
+        f"{sc_id} - Orbit {orb_num}\n"
+        f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+        f"{time_utc[use_obs][-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
+    )
+    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
+
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
+    add_pipeline_metadata(fig, nc_data)
+    overlay_ezie_logo(fig)
+
+    fig.autofmt_xdate()
+    plt.subplots_adjust(
+        left=0.06,
+        right=0.99,
+        bottom=0.10,
+        top=0.91,
+        hspace=0.00,
+        wspace=0.05,
+    )
+    save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        figure=fig,
+        obs_date=obs_date,
+        spacecraft=sc_id,
+        # orbit=orb_num,
+        tstmp=t_stamp,
+        plot_type=plot_type,
+        overwrite=overwrite,
+        dpi=figure_dpi,
+        dark_mode=dark_mode,
+    )
+
+
+def sza_overlay(
+    map_axs,
+    MLT_sign,
+    sun_lat_rad,
+    sun_lon_rad,
+    sun_mlon_deg=None,
+    magnetic=False,
+    time4mag=None,
+):
+    # Compute dot product of normal vector at each location on earth with the vector to
+    # the sun at the appropriate time to establish SZA grid.
+    lonvec = np.radians(np.linspace(-180, 180, 91))
+    latvec = np.radians(np.linspace(-90, 90, 46))
+    # lonvec = np.radians(np.linspace(-180, 180, 121))
+    # latvec = np.radians(np.linspace(-90, 90, 61))
+    # lonvec = np.radians(np.linspace(-180, 180, 181))
+    # latvec = np.radians(np.linspace(-90, 90, 91))
+    longrd, latgrd = np.meshgrid(lonvec, latvec)
+    pgrd = np.array(
+        [
+            np.cos(MLT_sign * longrd) * np.cos((latgrd)),
+            np.sin(MLT_sign * longrd) * np.cos((latgrd)),
+            np.sin((latgrd)),
+        ]
+    ).T
+    psun = np.array(
+        [
+            np.cos(MLT_sign * sun_lon_rad) * np.cos((sun_lat_rad)),
+            np.sin(MLT_sign * sun_lon_rad) * np.cos((sun_lat_rad)),
+            np.sin((sun_lat_rad)),
+        ]
+    )
+    szagrd = np.degrees(np.acos(np.dot(pgrd, psun))).T
+
+    # Transform coordintes to magnetic lat/lon if required. note that this must be done
+    # AFTER computation of the dot product. The magnetic coordinate system is not
+    # orthogonal and regular (TODO: describe this better).
+    if magnetic:
+        logger.info("Performing magnetic coordinate transformation")
+        bgn = time.perf_counter()
+
+        apex = Apex(date=time4mag.year, refh=0)
+        lat_map, lon_map = apex.geo2apex(
+            np.degrees(latgrd).ravel(),
+            np.degrees(longrd).ravel(),
+            REFERENCE_ALTITUDE_KM,
+        )
+        # lat_map, lon_map = apex.gg_gm_apex(
+        #     int(time4mag.year),
+        #     np.degrees(latgrd).ravel(),
+        #     np.degrees(longrd).ravel(),
+        #     REFERENCE_ALTITUDE_KM,
+        #     apex.GEO_TO_MAG,
+        # )
+
+        lat_map = np.reshape(lat_map, latgrd.shape)
+        lon_map = np.reshape(lon_map, longrd.shape) + 180 - sun_mlon_deg
+        end = time.perf_counter()
+        logger.info(f"Elapsed time: {end - bgn:.2f} seconds")
+    else:
+        lat_map = np.degrees(latgrd)
+        lon_map = np.degrees(longrd)
+
+    if magnetic:
+        map_axs.pcolormesh(
+            MLT_sign * lon_map,
+            lat_map,
+            180.0 - szagrd,
+            shading="auto",
+            cmap="afmhot",
+            alpha=0.9,
+            transform=DATA_TRANSFORM,
+        )
+
+    else:
+        map_axs.contourf(
+            MLT_sign * lon_map,
+            lat_map,
+            180.0 - szagrd,
+            levels=90,
+            cmap="afmhot",
+            alpha=0.90,
+            transform=DATA_TRANSFORM,
+        )
+    conval = map_axs.contour(
+        MLT_sign * lon_map,
+        lat_map,
+        szagrd,
+        levels=np.linspace(0, 180, 19),
+        colors="k",
+        linestyles=":",
+        transform=DATA_TRANSFORM,
+        alpha=0.5,
+    )
+    map_axs.clabel(
+        conval,
+        colors="#808080",
+        fontsize="small",
+    )
