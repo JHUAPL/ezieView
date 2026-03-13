@@ -67,10 +67,8 @@ python3 -m ezieview.update_coverage_plots [CLI options]
 glow_daily [CLI options]
 
 python3 -m ezieview.update_orbit_plots [CLI options]
-... or one of
-glow_l1 [CLI options]
-glow_l2 [CLI options]
-glow_l3 [CLI options]
+... or 
+glow_orbit [CLI options]
 ```
 
 ## Shell script interface
