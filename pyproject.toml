@@ -29,7 +29,6 @@ dependencies = [
 # script-files = [ "make_ezie_images.sh" ]
 
 [project.scripts]
-glow_all= "make_ezie_images.sh" 
 glow_daily = "ezieview.update_coverage_plots:main" 
 glow_orbit = "ezieview.update_orbit_plots:main" 
 
