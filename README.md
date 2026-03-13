@@ -49,18 +49,34 @@ UV_CACHE_DIR=/project/ezie/.cache/uv PIP_INDEX_URL=https://pypi.org/simple pytho
 
 ## Install GLOW/ezieView
 
+- Create the directory where you'd like to install the package and initialize your venv:
+
 ```bash
 mkdir ezvtest
 cd ezvtest
 uv venv -p 3.12
-UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install ../glow
-. .venv/bin/activate
 ```
 
-- Make images by running any of the following:
+- Option A, for developers: Install in "editable" mode, allowing you to modify the
+  package code and see the changes immediately:
 
 ```bash
-.venv/bin/make_ezie_images.sh
+UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install -e ../glow
+```
+
+- Option B, for regular users: Install in the normal fashion. Eventually the package
+  will be available from the Artifactory (JHUAPL) or PyPi (rest of world) and will be
+  installed by name rather than a local file path/wheel.
+
+```bash
+UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install ../glow/dist/ezieview-0.0.1-py3-none-any.whl
+```
+
+- Make images by running any of the following or alternatively using a shell script like
+  the one shown below.
+
+```bash
+. .venv/bin/activate
 
 python3 -m ezieview.update_coverage_plots [CLI options]
 ... or 
