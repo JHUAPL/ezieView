@@ -1023,22 +1023,23 @@ def main(
     figure_dpi,
 ) -> int:
     """
-    Generate a set of EZIE single-orbit summary plots based on the specified date and
+    Generate a set of EZIE full-day summary plots based on the specified date and
     supplied file types, as determined by the supplied file pattern input. Options to
-    make plots at higher resolution (-hr/--high_res_dpi = 300 DPI, default is 100 DPI)
+    make plots at higher resolution (-dpi/--figure_dpi, default is 100 DPI)
     and in 'dark mode' are also available.
 
     Example command line--run from repo root, in an activated python venv:
 
     \b
-    python3 update_orbit_plots.py \\
+    glow_daily \\
         -d0 2025-06-20 \\
         -d1 2025-06-22 \\
-        -fd '/project/ezie/data/' \\
+        -fd '/project/ezie/data/l1' \\
         -fp 'ezie_l1_*.nc4'  \\
-        -pd "/project/ezie/gateway/plots"
+        -pd "/project/ezie/plots/daily-summary"
 
     """
+    # python3 update_coverage_plots.py \\
     # Begin - configure logging, log all supplied arguments
     t_bgn = datetime.datetime.now(UTC_TZ)
     start_date = start_date.replace(tzinfo=UTC_TZ)

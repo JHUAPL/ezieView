@@ -80,6 +80,8 @@ from .ezvislib.kernel_mgr import spice_kernel_mgr
 @click.option(
     "-dm",
     "--dark_mode",
+    default=False,
+    type=bool,
     is_flag=True,
     help="Generate plots using 'dark mode' format",
 )
@@ -104,20 +106,21 @@ def main(
     """
     Generate a set of EZIE single-orbit summary plots based on the specified date and
     supplied file types, as determined by the supplied file pattern input. Options to
-    make plots at higher resolution (-hr/--high_res_dpi = 300 DPI, default is 100 DPI)
+    make plots at higher resolution (-dpi/--figure_dpi, default is 100 DPI)
     and in 'dark mode' are also available.
 
     Example command line--run from repo root, in an activated python venv:
 
     \b
-    python3 update_orbit_plots.py \\
+    glow_orbit \\
         -d0 2025-06-20 \\
         -d1 2025-06-22 \\
-        -fd '/project/ezie/data/' \\
-        -fp 'ezie_l1_*.nc4'  \\
-        -pd "/project/ezie/gateway/plots"
+        -fd '/project/ezie/data/l2' \\
+        -fp 'ezie_l2_*.nc4'  \\
+        -pd "/project/ezie/plots/single-orbit"
 
     """
+    # python3 update_orbit_plots.py \\
     # Begin - configure logging, log all supplied arguments
     t_bgn = datetime.datetime.now(UTC_TZ)
     # Using method's default log output folder and log level (INFO)
