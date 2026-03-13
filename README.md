@@ -74,7 +74,7 @@ glow_orbit [CLI options]
 ## Shell script interface
 
 - The following shell script will generate all images for a given date range, as defined
-  by START_DATE and STOP_DATE below.
+  by EZ_BGN_DATE and EZ_END_DATE below.
 
 ```bash
 #!/bin/bash
