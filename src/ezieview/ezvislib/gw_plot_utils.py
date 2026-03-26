@@ -18,9 +18,8 @@ import matplotlib.ticker as mtick
 import netCDF4
 import numpy as np
 from apexpy import Apex
+from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 from netCDF4 import Dataset
-
-from .gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 
 # endregion
 
@@ -154,25 +153,46 @@ def extract_science_passes(nc_data: netCDF4.Dataset):
 
 
 def parse_ezie_product_name(source: str | Path):
+    parsed = None
     if not isinstance(source, Path):
-        stem = Path(source).stem
+        source_as_path = Path(source)
     else:
-        stem = source.stem
-    pattern = (
-        "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
-    )
-    match = re.compile(pattern).search(stem)
-    if hasattr(match, "group"):
-        parsed = dict(
-            prod=match.group(1),
-            date=match.group(2),
-            time=match.group(3),
-            spcv=match.group(4),
-            vrsn=match.group(5),
-            rvsn=match.group(6),
+        source_as_path = source
+    stem = source_as_path.stem
+    # FIXME: Will need to modify this once L2 and L3 products adopt naming convention
+    # that includes the orbit number.
+    if "l1" in stem and "orbit" in source.as_posix():
+        pattern = (
+            "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})_(\\d{6})"
+            "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
         )
-    # except Exception as exc:
+        match = re.compile(pattern).search(stem)
+        if hasattr(match, "group"):
+            parsed = dict(
+                prod=match.group(1),
+                date=match.group(2),
+                time=match.group(3),
+                orbt=match.group(4),
+                spcv=match.group(5),
+                vrsn=match.group(6),
+                rvsn=match.group(7),
+            )
     else:
+        pattern = (
+            "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})"
+            "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
+        )
+        match = re.compile(pattern).search(stem)
+        if hasattr(match, "group"):
+            parsed = dict(
+                prod=match.group(1),
+                date=match.group(2),
+                time=match.group(3),
+                spcv=match.group(4),
+                vrsn=match.group(5),
+                rvsn=match.group(6),
+            )
+    if parsed is None:
         if stem != "":
             # We pass an empty string deliberately when the file filter fails to find a
             # match, and we deliberately return a 'parsed' dict with entries set to NaN
@@ -183,6 +203,7 @@ def parse_ezie_product_name(source: str | Path):
             prod=math.nan,
             date=math.nan,
             time=math.nan,
+            orbt=math.nan,
             spcv=math.nan,
             vrsn=math.nan,
             rvsn=math.nan,
