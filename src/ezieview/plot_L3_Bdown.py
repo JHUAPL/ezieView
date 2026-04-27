@@ -15,16 +15,16 @@ from cartopy.mpl.geoaxes import GeoAxes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from netCDF4 import Dataset
 
-from .ezvislib.constants import (
+from ezieview.ezvislib.constants import (
     EARTH_FLATTENING,
     EARTH_RADIUS_EQUATORIAL,
 )
-from .ezvislib.gw_plot_methods import (
+from ezieview.ezvislib.gw_plot_methods import (
     NCDF_MISSING,
     plot_geomagnetic_references,
     save_close_figure,
 )
-from .ezvislib.gw_plot_params import (
+from ezieview.ezvislib.gw_plot_params import (
     DATA_TRANSFORM,
     EZIE_DATE_FORMAT,
     GEO_LAT_LOWER_LIMIT,
@@ -33,7 +33,7 @@ from .ezvislib.gw_plot_params import (
     REFERENCE_ALTITUDE_KM,
     SOUTH,
 )
-from .ezvislib.gw_plot_utils import (
+from ezieview.ezvislib.gw_plot_utils import (
     add_product_metadata,
     map_inverted_continents,
     overlay_ezie_logo,

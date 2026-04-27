@@ -6,20 +6,20 @@ import click
 import spiceypy
 from netCDF4 import Dataset
 
-from . import plot_L3_Bdown
-from .ezvislib import gw_logger, gw_plot_methods
-from .ezvislib.gw_plot_params import (
+from ezieview import plot_L3_Bdown
+from ezieview.ezvislib import gw_logger, gw_plot_methods
+from ezieview.ezvislib.gw_plot_params import (
     CLI_DATE_FORMAT,
     DFLT_RES,
     UTC_TZ,
 )
-from .ezvislib.gw_plot_utils import (
+from ezieview.ezvislib.gw_plot_utils import (
     filter_daily_files_by_version,
     filter_files_by_version,
     parse_ezie_product_name,
     split_on_science_segments,
 )
-from .ezvislib.kernel_mgr import spice_kernel_mgr
+from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
 
 # endregion imports
 

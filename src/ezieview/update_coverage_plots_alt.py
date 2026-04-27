@@ -12,12 +12,12 @@ import numpy as np
 from cartopy.mpl.geoaxes import GeoAxes
 from netCDF4 import Dataset
 
-from .ezvislib import gw_logger
-from .ezvislib.gw_plot_methods import (
+from ezieview.ezvislib import gw_logger
+from ezieview.ezvislib.gw_plot_methods import (
     plot_geomagnetic_references,
     save_close_figure,
 )
-from .ezvislib.gw_plot_params import (
+from ezieview.ezvislib.gw_plot_params import (
     ALTERNATE_FIG_SIZE,
     BGN_COLOR,
     # BOUND_EQUATORIAL,
@@ -55,7 +55,7 @@ from .ezvislib.gw_plot_params import (
     SZA,
     UTC_TZ,
 )
-from .ezvislib.gw_plot_utils import (
+from ezieview.ezvislib.gw_plot_utils import (
     filter_daily_files_by_version,
     parse_ezie_product_name,
 )

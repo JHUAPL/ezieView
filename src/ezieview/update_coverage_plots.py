@@ -9,14 +9,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from netCDF4 import Dataset
 
-from .ezvislib import gw_logger
-from .ezvislib.gw_plot_methods import (
+from ezieview.ezvislib import gw_logger
+from ezieview.ezvislib.gw_plot_methods import (
     coverage_plot_polar_layout,
     coverage_plot_stereographic_layout,
     mollweide_layout,
     save_close_figure,
 )
-from .ezvislib.gw_plot_params import (
+from ezieview.ezvislib.gw_plot_params import (
     ALTERNATE_FIG_SIZE,
     BGN_COLOR,
     # BOUND_EQUATORIAL,
@@ -53,7 +53,7 @@ from .ezvislib.gw_plot_params import (
     SZA,
     UTC_TZ,
 )
-from .ezvislib.gw_plot_utils import (
+from ezieview.ezvislib.gw_plot_utils import (
     filter_daily_files_by_version,
     parse_ezie_product_name,
 )
@@ -69,11 +69,39 @@ def ingest_full_day_all_sv(
     used_files: list,  # list of L1 paths
 ):
     """
-    Generate dictionary of all locations sampled by the EZIE spacecraft in the course of
-    one day (~15 orbits each). The dictionary key hierarchy is
-    1) SV
-    2) L1 var names (from coverage_db_list below)
+    Ingest and aggregate geolocation and metadata data from all EZIE Level-1 files
+    for a specified date across all spacecraft (~15 orbits each).
+
+    This function processes a list of L1 NetCDF files, extracts relevant variables
+    (such as satellite latitude/longitude, MEM observation coordinates, magnetic
+    latitude, MLT, and solar zenith angles), and combines them into a unified
+    dictionary containing data for all orbits of the day.
+
+    Parameters
+    ----------
+    run_date : str
+        The date to process, formatted as 'YYYYMMDD'.
+    used_files : list
+        A list of file paths (Path objects or strings) pointing to the L1 NetCDF
+        files to be ingested.
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - full_day (dict): A dictionary where keys are variable names (e.g., 'sat_lat',
+          'obs_maglat1') and values are numpy arrays of the aggregated data for all
+          spacecraft and orbits on the given date.
+        - uniq_svid (numpy.ndarray): An array of unique spacecraft identifiers found
+          in the processed files.
+        - uniq_orbs (numpy.ndarray): An array of unique orbit numbers found in the
+          processed files.
     """
+
+    # Generate dictionary of all locations sampled by the EZIE spacecraft in the course
+    # of one day. The dictionary key hierarchy is:
+    # 1) SV
+    # 2) L1 var names (from coverage_db_list below)
     coverage_db_list = [
         "/Metadata/SpaceVehicle",
         "/Science/orbit_number",
@@ -187,6 +215,19 @@ def plot_mlt_sza_coverage(
         3. Solar Zenith Angle
         Break L1 for each SV into orbits so we can make 2-D histogram of coverage versus
         orbit for this day, rather than just determining coverage for day as a whole.
+
+    Args:
+        obs_date (datetime.datetime): _description_
+        sc_id (np.ndarray): _description_
+        orbit (np.ndarray): _description_
+        mem_mlat (np.ndarray): _description_
+        mem_MLT (np.ndarray): _description_
+        mem_sza (np.ndarray): _description_
+        mem_mode (np.ndarray): _description_
+        regions (list): _description_
+        dark_mode (bool, optional): _description_. Defaults to False.
+        overwrite (bool, optional): _description_. Defaults to False.
+        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
     """
 
     orb_min = np.min(orbit)
