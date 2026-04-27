@@ -18,8 +18,9 @@ import matplotlib.ticker as mtick
 import netCDF4
 import numpy as np
 from apexpy import Apex
-from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 from netCDF4 import Dataset
+
+from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 
 # endregion
 
@@ -176,6 +177,9 @@ def parse_ezie_product_name(source: str | Path):
                 spcv=match.group(5),
                 vrsn=match.group(6),
                 rvsn=match.group(7),
+                dttm=datetime.datetime.strptime(
+                    f"{match.group(2)}_{match.group(3)}", "%Y%m%d_%H%M%S"
+                ).replace(tzinfo=datetime.UTC),
             )
     else:
         pattern = (
@@ -191,6 +195,9 @@ def parse_ezie_product_name(source: str | Path):
                 spcv=match.group(4),
                 vrsn=match.group(5),
                 rvsn=match.group(6),
+                dttm=datetime.datetime.strptime(
+                    f"{match.group(2)}_{match.group(3)}", "%Y%m%d_%H%M%S"
+                ).replace(tzinfo=datetime.UTC),
             )
     if parsed is None:
         if stem != "":
@@ -207,6 +214,7 @@ def parse_ezie_product_name(source: str | Path):
             spcv=math.nan,
             vrsn=math.nan,
             rvsn=math.nan,
+            dttm=math.nan,
         )
     return collections.namedtuple(
         "GenericDict",
