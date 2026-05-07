@@ -19,6 +19,10 @@ EARTH_RADIUS_EQUATORIAL = 6378.137
 WGS84 value for equatorial radius of the Earth, in km.  
 """
 
+EARTH_RADIUS_POLAR = 6356.752314245
+"""
+WGS84 value for polar radius of the Earth, in km.  
+"""
 # ===== Date-related parameters =======================================================
 UTC_TZ = datetime.UTC
 DATE_NOW = datetime.datetime.now(UTC_TZ)
