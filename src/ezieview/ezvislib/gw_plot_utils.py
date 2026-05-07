@@ -18,9 +18,8 @@ import matplotlib.ticker as mtick
 import netCDF4
 import numpy as np
 from apexpy import Apex
-from netCDF4 import Dataset
-
 from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
+from netCDF4 import Dataset
 
 # endregion
 
@@ -153,6 +152,31 @@ def extract_science_passes(nc_data: netCDF4.Dataset):
     return index_pairs
 
 
+def jpl_safe_datetime(
+    datestr: str,
+    timestr: str,
+):
+    try:
+        # Should work with any VALID date and time strings
+        date_sanitized = datetime.datetime.strptime(
+            f"{datestr}_{timestr}", "%Y%m%d_%H%M%S"
+        ).replace(tzinfo=datetime.UTC)
+    except Exception as exc:
+        # Should fix cases where seconds was set to 60. Error handling should be made
+        # more general, but this'll get us past the current roadblock.
+        _datestr = datestr
+        _timestr = timestr[0:4] + "59"
+        logger.warning("Encountered exception parsing date or time string in filename:")
+        logger.warning(f"====> {exc}")
+        logger.warning(
+            f"Date + time modified from {datestr}_{timestr} to {_datestr}_{_timestr}"
+        )
+        date_sanitized = datetime.datetime.strptime(
+            f"{_datestr}_{_timestr}", "%Y%m%d_%H%M%S"
+        ).replace(tzinfo=datetime.UTC)
+    return date_sanitized
+
+
 def parse_ezie_product_name(source: str | Path):
     parsed = None
     if not isinstance(source, Path):
@@ -177,9 +201,7 @@ def parse_ezie_product_name(source: str | Path):
                 spcv=match.group(5),
                 vrsn=match.group(6),
                 rvsn=match.group(7),
-                dttm=datetime.datetime.strptime(
-                    f"{match.group(2)}_{match.group(3)}", "%Y%m%d_%H%M%S"
-                ).replace(tzinfo=datetime.UTC),
+                dttm=jpl_safe_datetime(datestr=match.group(2), timestr=match.group(3)),
             )
     else:
         pattern = (
@@ -187,6 +209,12 @@ def parse_ezie_product_name(source: str | Path):
             "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
         )
         match = re.compile(pattern).search(stem)
+        # JPL sent us a file with seconds=60?
+        if stem != "":
+            logger.debug(f"File name: {source_as_path.as_posix()}")
+            logger.debug(
+                f"Parsed values for date: {match.group(2)} time: {match.group(3)}"
+            )
         if hasattr(match, "group"):
             parsed = dict(
                 prod=match.group(1),
@@ -195,9 +223,7 @@ def parse_ezie_product_name(source: str | Path):
                 spcv=match.group(4),
                 vrsn=match.group(5),
                 rvsn=match.group(6),
-                dttm=datetime.datetime.strptime(
-                    f"{match.group(2)}_{match.group(3)}", "%Y%m%d_%H%M%S"
-                ).replace(tzinfo=datetime.UTC),
+                dttm=jpl_safe_datetime(datestr=match.group(2), timestr=match.group(3)),
             )
     if parsed is None:
         if stem != "":
@@ -318,15 +344,16 @@ def filter_files_by_version(
     # Further filter the initial group of files by date, keeping only the latest version
     # for any given date and spacecraft.
     revisions = {}
-    dttm_frmt = "%Y%m%d_%H%M%S"
+    # dttm_frmt = "%Y%m%d_%H%M%S"
     for each_file in ezie_files:
         prsd = parse_ezie_product_name(each_file)
         if str(prsd.date) == "nan":
             logger.error(f"Invalid file name encountered: {each_file.stem}")
             continue  # file name was NOT valid
-        file_dttm = datetime.datetime.strptime(
-            f"{prsd.date}_{prsd.time}", dttm_frmt
-        ).replace(tzinfo=datetime.UTC)
+        file_dttm = jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time)
+        # file_dttm = datetime.datetime.strptime(
+        #     f"{prsd.date}_{prsd.time}", dttm_frmt
+        # ).replace(tzinfo=datetime.UTC)
         log_mthd(f"Examining file {each_file.name} with date {prsd.date}_{prsd.time}")
         # Will "backup" subdirectory regularly appear in pipeline data directory? TBD
         if (
@@ -368,9 +395,10 @@ def filter_files_by_version(
             prsd = parse_ezie_product_name(each_file)
             file_key, tstamp = (
                 f"sv{prsd.spcv}_v{prsd.vrsn}_r{prsd.rvsn}",
-                datetime.datetime.strptime(
-                    f"{prsd.date}_{prsd.time}", dttm_frmt
-                ).replace(tzinfo=datetime.UTC),
+                jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time),
+                # datetime.datetime.strptime(
+                #     f"{prsd.date}_{prsd.time}", dttm_frmt
+                # ).replace(tzinfo=datetime.UTC),
             )
             log_mthd(f"{file_key} {tstamp}")
             if file_key not in tstamps:

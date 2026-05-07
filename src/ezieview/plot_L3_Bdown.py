@@ -15,10 +15,6 @@ from cartopy.mpl.geoaxes import GeoAxes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from netCDF4 import Dataset
 
-from ezieview.ezvislib.constants import (
-    EARTH_FLATTENING,
-    EARTH_RADIUS_EQUATORIAL,
-)
 from ezieview.ezvislib.gw_plot_methods import (
     NCDF_MISSING,
     plot_geomagnetic_references,
@@ -26,6 +22,8 @@ from ezieview.ezvislib.gw_plot_methods import (
 )
 from ezieview.ezvislib.gw_plot_params import (
     DATA_TRANSFORM,
+    EARTH_FLATTENING,
+    EARTH_RADIUS_EQUATORIAL,
     EZIE_DATE_FORMAT,
     GEO_LAT_LOWER_LIMIT,
     MAG_LAT_LOWER_LIMIT,

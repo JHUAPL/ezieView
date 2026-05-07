@@ -2,6 +2,23 @@ import datetime
 
 import cartopy.crs as ccrs
 
+# ===== Physical constants ============================================================
+C = 2.99792458e8
+"""
+Speed of light in m/s
+"""
+
+EARTH_FLATTENING = 1 / 298.257223563
+"""
+WGS84 value for flattening of the Earth.  This is (a-b)/a where a is the equatorial and
+b is the polar radius.
+"""
+
+EARTH_RADIUS_EQUATORIAL = 6378.137
+"""
+WGS84 value for equatorial radius of the Earth, in km.  
+"""
+
 # ===== Date-related parameters =======================================================
 UTC_TZ = datetime.UTC
 DATE_NOW = datetime.datetime.now(UTC_TZ)

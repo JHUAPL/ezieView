@@ -32,7 +32,6 @@ from cartopy.mpl.geoaxes import GeoAxes
 from cartopy.mpl.ticker import LatitudeFormatter
 from netCDF4 import Dataset, default_fillvals
 
-from ezieview.ezvislib.constants import EARTH_FLATTENING, EARTH_RADIUS_EQUATORIAL, C
 from ezieview.ezvislib.gw_plot_params import (
     ALTERNATE_FIG_SIZE,
     AVERAGING_WINDOW,
@@ -45,6 +44,8 @@ from ezieview.ezvislib.gw_plot_params import (
     DBS_MOD,
     DEFAULT_FIG_SIZE,
     DFLT_RES,
+    EARTH_FLATTENING,
+    EARTH_RADIUS_EQUATORIAL,
     FLD_CLR,
     FLD_CMP,
     FLD_MODES,
@@ -63,6 +64,7 @@ from ezieview.ezvislib.gw_plot_params import (
     TERMINATOR_ALPHA,
     TERMINATOR_COLOR,
     TOT_MOD,
+    C,
 )
 from ezieview.ezvislib.gw_plot_utils import (
     add_pipeline_metadata,
