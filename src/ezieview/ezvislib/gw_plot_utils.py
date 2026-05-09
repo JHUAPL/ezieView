@@ -209,13 +209,14 @@ def parse_ezie_product_name(source: str | Path):
             "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
         )
         match = re.compile(pattern).search(stem)
-        # JPL sent us a file with seconds=60?
-        if stem != "":
+        if match is None:
+            logger.warning(f"Anomalous file name: {source_as_path.as_posix()}")
+        elif hasattr(match, "group"):
+            # JPL sent us a file with seconds=60?
             logger.debug(f"File name: {source_as_path.as_posix()}")
             logger.debug(
                 f"Parsed values for date: {match.group(2)} time: {match.group(3)}"
             )
-        if hasattr(match, "group"):
             parsed = dict(
                 prod=match.group(1),
                 date=match.group(2),
