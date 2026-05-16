@@ -18,8 +18,9 @@ import matplotlib.ticker as mtick
 import netCDF4
 import numpy as np
 from apexpy import Apex
-from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 from netCDF4 import Dataset
+
+from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 
 # endregion
 
@@ -269,8 +270,8 @@ def filter_daily_files_by_version(
     """
     Create list of highest version/revision for a given spacecraft and date.
     """
-    log_mthd = logger.debug
-    # log_mthd = logger.info
+    # log_mthd = logger.debug
+    log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
@@ -393,6 +394,7 @@ def filter_files_by_version(
         # Yes. We need to do some more filtering (below).
         tstamps = {}
         for ff, each_file in enumerate(newest_versions):
+            log_mthd(f"Input {ff:04d} {each_file.name}")
             prsd = parse_ezie_product_name(each_file)
             file_key, tstamp = (
                 f"sv{prsd.spcv}_v{prsd.vrsn}_r{prsd.rvsn}",
@@ -407,7 +409,9 @@ def filter_files_by_version(
             tstamps[file_key].append((tstamp, each_file))
 
         # Files should ALWAYS be of the same product type
-        if "_l0" in each_file.stem or "_l1_" in each_file.stem:
+        if "_l0" in each_file.stem or (
+            ("_l1_" in each_file.stem) and ("daily" in each_file.parent.name)
+        ):
             dup_time_limit = 86400  # seconds, for full day files
         else:
             dup_time_limit = 60  # seconds, for single orbit files
@@ -434,6 +438,8 @@ def filter_files_by_version(
         pruned_versions = sorted([each_pair[1] for each_pair in all_pruned])
         log_mthd(f"Pruned versions are {pruned_versions}")
         if len(pruned_versions) > 0:
+            for ff, each_file in enumerate(pruned_versions):
+                log_mthd(f"Pruned: {ff:04d} {each_file.name}")
             return pruned_versions
         else:
             return  # do NOT return an empty list
@@ -780,14 +786,15 @@ def add_product_metadata(
     fig: plt.Figure,
     nc_data: Dataset,
     source: Path,
+    size: str = "small",
 ):
     """
     Add figure text with source file metadata, dealing with files that have different
     formats for version and revision or even no version or revision designation at all.
     """
-    prsd = parse_ezie_product_name(source)
-    ver_str = f"v{prsd.vrsn}" if str(prsd.vrsn) != "nan" else "TEST"
-    rev_str = f"r{prsd.rvsn}" if str(prsd.rvsn) != "nan" else "TEST"
+    # prsd = parse_ezie_product_name(source)
+    # ver_str = f"v{prsd.vrsn}" if str(prsd.vrsn) != "nan" else "TEST"
+    # rev_str = f"r{prsd.rvsn}" if str(prsd.rvsn) != "nan" else "TEST"
 
     # Time specification differs from one product level to another (JPL vs APL?), and
     # currently L3 products have no internal creation date metadata whatsoever. Deal
@@ -808,36 +815,48 @@ def add_product_metadata(
         pass
     created = created[0:truncate]
 
-    src_str = (
-        f"Source Directory: {source.parent!s}" if source.parent is not None else ""
-    )
+    # src_str = (
+    #     f"Source Directory: {source.parent!s}" if source.parent is not None else ""
+    # )
     fig.text(
         0.005,
         0.005,
-        f"Data Version: {ver_str} Revision: {rev_str} Created: {created}   {src_str}",
+        # f"Data Version: {ver_str} Revision: {rev_str} Created: {created}   {src_str}",
+        f"Data Source: {source.name}  Source created at: {created}",
         ha="left",
         va="bottom",
         rotation=0,
         weight="bold",
-        size="small",
+        size=size,
     )
 
 
 def add_pipeline_metadata(
     fig: plt.Figure,
     nc_data: Dataset,
+    size: str = "small",
 ):
-    # print(nc_data["Metadata/SoftwareVersion"][:])  # Is sometimes 0, sometimes blank?
+    try:
+        pipeline_branch = f"{nc_data['Configuration/git_branch'][:]}"
+        commit_hash = f"{nc_data['Configuration/git_hash'][:]}"
+        if pipeline_branch == "":
+            pipeline_branch = "?"
+        if commit_hash == "":
+            commit_hash = "?"
+    except KeyError:
+        pipeline_branch = "Unavailable"
+        commit_hash = "Unavailable"
     fig.text(
         0.995,
         0.005,
-        f"Pipeline Software Version: {nc_data['Metadata/SoftwareVersion'][:]}",
+        # f"Pipeline Software Version: {nc_data['Metadata/SoftwareVersion'][:]}",
         # f" / Calibration Version: {nc_data['Metadata/CalibrationVersion'][:]}",
+        f"Pipeline Branch: {pipeline_branch}  Commit Hash: {commit_hash}",
         ha="right",
         va="bottom",
         rotation=0,
         weight="bold",
-        size="small",
+        size=size,
     )
 
 

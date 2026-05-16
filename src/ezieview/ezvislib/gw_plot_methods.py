@@ -97,6 +97,8 @@ PLT_NDX = [
     0,
 ]  # Positions of MEM[n] in stack of plots (top to bottom, ordered by angle WRT nadir)
 
+SCIENCE: int = 2
+
 # rc_fonts = {
 #     "text.usetex": True,
 #     # "text.latex.preview": True,
@@ -627,7 +629,7 @@ def plot_geolocation(
     )
     fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
     add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(fig, nc_data)
+    add_pipeline_metadata(fig=fig, nc_data=nc_data)
     overlay_ezie_logo(fig)
     plt.subplots_adjust(
         left=0.06, right=0.98, bottom=0.07, top=0.93, wspace=0.12, hspace=0.01
@@ -688,7 +690,7 @@ def plot_ancillary(
     if ftgt.exists() and not overwrite:
         logger.info(f"File exists, skipping: {ftgt.as_posix()}")
         return
-    logger.info("Generating plot of ancillary data")
+    logger.info("Generating plot of ancillary (IGRF) data")
 
     # Prepare figure for plotting with sharex and sharey
     fig, axs = plt.subplots(
@@ -721,12 +723,12 @@ def plot_ancillary(
         ax.grid(True)
         ax.set_xlabel("Time (UTC)", weight="bold")
         if mem_ndx == 0:
-            ax.set_ylabel("Ancillary B-Fields\n(nT)", weight="bold")
+            ax.set_ylabel("IGRF-14 B-Fields\n(nT)", weight="bold")
             ax.legend(loc="upper left")
 
     # Tweak position and add any figure-level annotation
     # title_date_time = time_utc[len(time_utc) // 2]  # get midpoint of observation
-    fig_title = "Ancillary B Field Values: "
+    fig_title = "IGRF-14 B Field Values: "
     fig_title = fig_title + (
         f"{sc_id} - Orbit {orb_num}\n"
         f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S UT')} - "
@@ -734,7 +736,7 @@ def plot_ancillary(
     )
     fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
     add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(fig, nc_data)
+    add_pipeline_metadata(fig=fig, nc_data=nc_data)
     overlay_ezie_logo(fig)
     plt.subplots_adjust(
         left=0.07,
@@ -779,10 +781,17 @@ def plot_calibration(
     time_utc, obs_date = get_datetime_from_utc_string(
         nc_data.groups["Time"], indices=indices
     )
-    i0, i1 = indices
+    t_stamp = time_utc[0].strftime("%H%M%S")
+    # i0, i1 = indices  # Whole file with JPL "padding"
+
+    # Plot only times when the acquisition mode is SCIENCE
+    obs_flg = nc_data["ChannelOrderedCounts/acquisition_mode"][:] == SCIENCE
+    i0, i1 = np.argmax(obs_flg), obs_flg.size - np.argmax(obs_flg[::-1])
+    time_utc = time_utc[i0:i1]
+    logger.debug(f"{obs_flg.size} - {i0} : {i1}")
+
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
     product = nc_data.getncattr("product")
-    t_stamp = time_utc[0].strftime("%H%M%S")
     orb_num = nc_data["Science/orbit_number"][i0]
 
     t_kinds = ["TA", "TB"]
@@ -952,7 +961,7 @@ def plot_calibration(
             va="top",
         )
         add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-        add_pipeline_metadata(fig, nc_data)
+        add_pipeline_metadata(fig=fig, nc_data=nc_data)
         overlay_ezie_logo(fig)
         save_close_figure(
             source=source,
@@ -1296,7 +1305,7 @@ def plot_retrieved_b_fields(
         )
         fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
         add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-        add_pipeline_metadata(fig, nc_data)
+        add_pipeline_metadata(fig=fig, nc_data=nc_data)
         overlay_ezie_logo(fig)
         fig.text(
             0.01,
@@ -1776,7 +1785,7 @@ def plot_retrieved_bd_only(
     )
     fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
     add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(fig, nc_data)
+    add_pipeline_metadata(fig=fig, nc_data=nc_data)
     overlay_ezie_logo(fig)
     plt.subplots_adjust(
         left=0.06,
@@ -2624,7 +2633,7 @@ def plot_mag_and_geo_maps(
     fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
 
     add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(fig, nc_data)
+    add_pipeline_metadata(fig=fig, nc_data=nc_data)
     overlay_ezie_logo(fig)
 
     fig.autofmt_xdate()

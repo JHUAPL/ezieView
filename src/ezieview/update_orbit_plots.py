@@ -14,10 +14,8 @@ from ezieview.ezvislib.gw_plot_params import (
     UTC_TZ,
 )
 from ezieview.ezvislib.gw_plot_utils import (
-    filter_daily_files_by_version,
     filter_files_by_version,
     parse_ezie_product_name,
-    split_on_science_segments,
 )
 from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
 
@@ -136,11 +134,13 @@ def main(
     # products that require separation of full-day files into individual science passes,
     # that segmentation will be performed in the individual product method.
     if "_l1_" in file_pattern:
-        keep_files = filter_daily_files_by_version(
+        # FIXME: Switching to per-orbit L1 files rather than dailies.
+        keep_files = filter_files_by_version(
             file_directory=file_directory,
             file_pattern=file_pattern,
             start_date=start_date,
             stop_date=stop_date,
+            remove_near_dupes=True,
         )
     else:
         keep_files = filter_files_by_version(
@@ -148,7 +148,7 @@ def main(
             file_pattern=file_pattern,
             start_date=start_date,
             stop_date=stop_date,
-            remove_near_dupes=True,  # FIXME: Set to False for test files lacking revisions
+            remove_near_dupes=True,  # FIXME: Set False for test files lacking revisions
         )
 
     if keep_files is None:
@@ -208,7 +208,8 @@ def main(
                     logger.info(f"Processing {product} file {Path(each_file).name}")
                     # Slice out the time intervals during which we may have had MEM
                     # observations.
-                    pass_indices = split_on_science_segments(nc_data)
+                    # pass_indices = split_on_science_segments(nc_data)
+                    pass_indices = [[0, -1]]
 
                     for index_pair in pass_indices:
                         # Requires L1 product file - not populated in L2 product ATM

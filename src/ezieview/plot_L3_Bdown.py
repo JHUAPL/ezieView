@@ -32,6 +32,7 @@ from ezieview.ezvislib.gw_plot_params import (
     SOUTH,
 )
 from ezieview.ezvislib.gw_plot_utils import (
+    add_pipeline_metadata,
     add_product_metadata,
     map_inverted_continents,
     overlay_ezie_logo,
@@ -430,9 +431,9 @@ def plot_b_1D_maps_with_time(
     plt.tight_layout()  # pad=0)
     plt.subplots_adjust(top=0.860, bottom=0.060)  # Modify tight_layout results slightly
 
-    # FIXME: Metadata not yet in L3 .nc4 files
-    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    # add_pipeline_metadata(fig, nc_data)
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source, size="x-small")
+    add_pipeline_metadata(fig=fig, nc_data=nc_data, size="x-small")
+
     if hemisphere is not None:
         subtitle = (
             "Plot is in Geodetic/WGS84 coordinates (solid grid). "

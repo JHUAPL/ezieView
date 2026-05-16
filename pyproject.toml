@@ -15,14 +15,17 @@ description = "Plotting routines for the EZIE Level 1, 2, and 3 data products"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "click",
-  "requests",
-  "matplotlib",
-  "numpy",
-  "netCDF4",
-  "spiceypy",
   "apexpy",
   "cartopy",
+  "click",
+  "matplotlib",
+  "mkdocs",
+  "mkdocs-material",
+  "mkdocstrings-python",
+  "netCDF4",
+  "numpy",
+  "requests",
+  "spiceypy",
 ]
 
 # [tool.setuptools]

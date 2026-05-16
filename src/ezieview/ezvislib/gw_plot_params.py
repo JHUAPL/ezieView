@@ -23,6 +23,17 @@ EARTH_RADIUS_POLAR = 6356.752314245
 """
 WGS84 value for polar radius of the Earth, in km.  
 """
+# ===== Model/retrieval parameters =======================================================
+REFERENCE_ALTITUDE_KM = 80
+"""
+Altitudea in km at which MEM footprints are geolocated
+"""
+
+O2_CTR_FREQ_MHZ = 118.750e3
+"""
+[Unshifted rest] Center frequency of observed O2 transition in MHz
+"""
+
 # ===== Date-related parameters =======================================================
 UTC_TZ = datetime.UTC
 DATE_NOW = datetime.datetime.now(UTC_TZ)
@@ -135,7 +146,6 @@ NUM_FLD = len(FLD_CMP)
 TOT_MOD = "Total"
 DBS_MOD = "dBs"
 FLD_MODES = [TOT_MOD, DBS_MOD]
-O2_CTR_FREQ_MHZ = 118.750e3
 
 # Potential data product types/levels. Exact flight data product species still TBD.
 L0A = "l0a"
@@ -156,8 +166,7 @@ LEVELS = [
     L3,
 ]
 
-# Quantitities we (used to) have to calculate from netcdf variables
+# Quantities we (used to) have to calculate from netcdf variables
 GEO_MAG = "S/C Geomagnetic"
 MEM_MAG = "MEM Geomagnetic"
 MEM_SZA = "MEM Solar Zenith Angle"
-REFERENCE_ALTITUDE_KM = 80
