@@ -54,7 +54,8 @@ from ezieview.ezvislib.gw_plot_params import (
     UTC_TZ,
 )
 from ezieview.ezvislib.gw_plot_utils import (
-    filter_daily_files_by_version,
+    # filter_daily_files_by_version,
+    filter_files_by_version,
     parse_ezie_product_name,
 )
 
@@ -138,7 +139,8 @@ def ingest_full_day_all_sv(
             continue
 
         # Gather entries for ALL orbits by this SV on this date
-        date_dict[prsd.spcv] = {}
+        if prsd.spcv not in date_dict.keys():
+            date_dict[prsd.spcv] = {}
         if "l1" in each_file.stem.lower():
             try:
                 with Dataset(each_file, mode="r") as nc_data:
@@ -146,38 +148,46 @@ def ingest_full_day_all_sv(
                     if product == "L1":
                         logger.info(f"Processing {product} file {Path(each_file).name}")
 
+                        if prsd.orbt not in date_dict[prsd.spcv].keys():
+                            date_dict[prsd.spcv][prsd.orbt] = {}
                         for dbvar in coverage_db_list:
                             try:
-                                date_dict[prsd.spcv][dbvar] = nc_data[dbvar][:].data
+                                date_dict[prsd.spcv][prsd.orbt][dbvar] = nc_data[dbvar][
+                                    :
+                                ].data
                             except AttributeError:
-                                date_dict[prsd.spcv][dbvar] = np.repeat(
+                                date_dict[prsd.spcv][prsd.orbt][dbvar] = np.repeat(
                                     str(nc_data[dbvar][:]),
                                     nc_data.dimensions["ObsRate"].size,
                                 )
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
-                        date_dict[prsd.spcv][dbvar] = None
+                        date_dict[prsd.spcv][prsd.orbt][dbvar] = None
             except Exception as exc:
                 logger.error(f"Unrecoverable problem, skipping file: {exc}")
-                date_dict[prsd.spcv][dbvar] = None
+                date_dict[prsd.spcv][prsd.orbt][dbvar] = None
 
     # Combine entries from each SV/L1 file into single unified dictionary
     for sv_id, sv_dict in date_dict.items():
-        for dbvar in coverage_db_list:
-            full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-            if full_key not in full_day.keys():
-                full_day[full_key] = []
-            try:
-                if sv_dict[dbvar] is not None:
-                    full_day[full_key].extend(sv_dict[dbvar])
-            except Exception as exc:
-                logger.error(f"Selected field could not be extracted from file: {exc}")
+        for orb_id, orb_dict in sv_dict.items():
+            for dbvar in coverage_db_list:
+                full_key = dbvar.split("/")[-1]  # Use only variable name, not group
+                if full_key not in full_day.keys():
+                    full_day[full_key] = []
+                try:
+                    if orb_dict[dbvar] is not None:
+                        full_day[full_key].extend(orb_dict[dbvar])
+                except Exception as exc:
+                    logger.error(
+                        f"Selected field could not be extracted from file: {exc}"
+                    )
 
     # Recast each dictionary value (list) as a numpy array
     for sv_id, sv_dict in date_dict.items():
-        for dbvar in coverage_db_list:
-            full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-            full_day[full_key] = np.array(full_day[full_key])
+        for orb_id, orb_dict in sv_dict.items():
+            for dbvar in coverage_db_list:
+                full_key = dbvar.split("/")[-1]  # Use only variable name, not group
+                full_day[full_key] = np.array(full_day[full_key])
 
     # FIXME: Not in .nc4 files! Borrowing MEM 1.
     # FIXME: Have these added to netcdf products? Otherwise must compute w/SPICE _here_.
@@ -1094,13 +1104,19 @@ def main(
     # Create list of highest version/revision for a given spacecraft and date. For
     # products that require separation of full-day files into individual science passes,
     # that segmentation will be performed in the individual product method.
-    keep_files = filter_daily_files_by_version(
+    # keep_files = filter_daily_files_by_version(
+    #     file_directory=file_directory,
+    #     file_pattern=file_pattern,
+    #     start_date=start_date,
+    #     stop_date=stop_date,
+    # ) # For daily L1 files
+    keep_files = filter_files_by_version(
         file_directory=file_directory,
         file_pattern=file_pattern,
         start_date=start_date,
         stop_date=stop_date,
-    )
-
+        remove_near_dupes=True,
+    )  # For per-orbit L1 files
     if keep_files is None:
         logger.error("No files found matching date specifications. Exiting")
         return 1
@@ -1118,7 +1134,7 @@ def main(
     for each_file in keep_files:
         prsd = parse_ezie_product_name(each_file)
         dates.append(prsd.date)
-        logger.info(f"{prsd!s}")
+        logger.debug(f"{prsd!s}")
         if str(prsd.vrsn) == "nan":
             logger.error(f"Corrupted file name? {each_file}")
             continue

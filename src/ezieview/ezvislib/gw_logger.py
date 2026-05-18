@@ -61,7 +61,7 @@ def initialize_logging(
             "%(asctime)s "
             "%(levelname)8s "
             "[%(filename)24s: %(lineno)4i] "
-            "%(funcName)-28s "
+            "%(funcName)-29s "
             "%(threadName)-20s "
             "%(process)-6d "
             "%(processName)-18s "
@@ -72,7 +72,7 @@ def initialize_logging(
             "%(asctime)s "
             "%(levelname)8s "
             "[%(filename)24s: %(lineno)4i] "
-            "%(funcName)-28s "
+            "%(funcName)-29s "
             "%(message)s"
         )
 
