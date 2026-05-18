@@ -48,7 +48,7 @@ ALTERNATE_FIG_SIZE = (16, 7)  # Short Landscsape
 GLOBAL_FIG_SIZE = (16, 15)  # Short Landscsape
 PORTRAIT_FIG_SIZE = (8.5, 11)
 DFLT_RES = 100  # DPI
-HIGH_RES = 300  # DPI, better suited for print or presentations
+HIGH_RES = 300  # DPI, better suited for print, presentations, or "eye plot" charts
 
 TERMINATOR_ALPHA = 0.25
 TERMINATOR_COLOR = "#000044"
@@ -85,7 +85,7 @@ SOUTH = "South"
 EQUATORIAL = "Equatorial"
 NORTH = "North"
 REGIONS = [NORTH, EQUATORIAL, SOUTH]
-# FIXME: Standardize these between various plot methods
+# TODO: Standardize these between various plot methods and remove redundancies
 BOUNDS = {}  # Must be [Lower, Upper]!
 BOUNDS[NORTH] = [+45.0, +90.0]
 BOUNDS[EQUATORIAL] = [-40.0, +40.0]
@@ -121,8 +121,8 @@ MEM_CB_CLR = [
 ]  # Uses colors from tableau-colorblind10 for accessibility.
 # C0 and C1 are used elsewhere for plotting.
 
-# FIXME: What angles and/or reference frames are desired here?
-# MEM_LK_ANGL = [-48.7, -20.3, 0.0, 42.7]  # FIXME: Update to use JPL standard?
+# TODO: What angles and/or reference frames preferred here? Update to use JPL standard?
+# MEM_LK_ANGL = [-48.7, -20.3, 0.0, 42.7]
 MEM_LOOK_DIRECTIONS = [
     +0.00,  # MEM1
     -26.0,  # MEM2

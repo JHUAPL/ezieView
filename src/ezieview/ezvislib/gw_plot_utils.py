@@ -834,6 +834,8 @@ def add_product_metadata(
 def add_pipeline_metadata(
     fig: plt.Figure,
     nc_data: Dataset,
+    git_branch: str | None = None,
+    git_commit: str | None = None,
     size: str = "small",
 ):
     try:
@@ -846,6 +848,12 @@ def add_pipeline_metadata(
     except KeyError:
         pipeline_branch = "Unavailable"
         commit_hash = "Unavailable"
+    # Allow override of values in data product, e.g., for using L2 product values for
+    # currently undefined L3 product pipeline info fields.
+    if git_branch is not None:
+        pipeline_branch = git_branch
+    if git_commit is not None:
+        commit_hash = git_commit
     fig.text(
         0.995,
         0.005,

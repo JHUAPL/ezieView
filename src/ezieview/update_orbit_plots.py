@@ -6,7 +6,6 @@ import click
 import spiceypy
 from netCDF4 import Dataset
 
-from ezieview import plot_L3_Bdown
 from ezieview.ezvislib import gw_logger, gw_plot_methods
 from ezieview.ezvislib.gw_plot_params import (
     CLI_DATE_FORMAT,
@@ -206,10 +205,35 @@ def main(
                 product = nc_data.getncattr("product")
                 if product == "L1":
                     logger.info(f"Processing {product} file {Path(each_file).name}")
+
+                    # TODO: Grab pipeleine version info fromm corresponding L2 file as
+                    # it is not yet incorporated in this product level. REMOVE once
+                    # product files have been updated.
+                    prsd = parse_ezie_product_name(each_file)
+                    source_l2 = (
+                        each_file.as_posix()
+                        .replace("l1/orbit", "l2")
+                        .replace("ezie_l1", "ezie_l2")
+                        .replace(f"_{prsd.orbt}", "")
+                    )
+
+                    try:
+                        with Dataset(source_l2, mode="r") as l2_data:
+                            git_branch = f"{l2_data['Configuration/git_branch'][:]}"
+                            git_commit = f"{l2_data['Configuration/git_hash'][:]}"
+                    except Exception as exc:
+                        logger.warning(
+                            "Unable to get commit & hash from source L2 file:"
+                        )
+                        logger.warning(f"==> {source_l2}")
+                        logger.warning(f"Exception was: {exc}")
+                        git_branch = None
+                        git_commit = None
+
                     # Slice out the time intervals during which we may have had MEM
                     # observations.
                     # pass_indices = split_on_science_segments(nc_data)
-                    pass_indices = [[0, -1]]
+                    pass_indices = [[0, -1]]  # When using per-orbit L1 files as inputs
 
                     for index_pair in pass_indices:
                         # Requires L1 product file - not populated in L2 product ATM
@@ -225,6 +249,8 @@ def main(
                                 save_directory=out_dir_path,
                                 t_diff=t_diff,
                                 overwrite=overwrite,
+                                git_branch=git_branch,
+                                git_commit=git_commit,
                                 dark_mode=dark_mode,
                                 figure_dpi=figure_dpi,
                             )
@@ -235,6 +261,8 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
+                            git_branch=git_branch,
+                            git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L0A or higher level product file
@@ -245,6 +273,8 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
+                            git_branch=git_branch,
+                            git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L1 or higher level product files
@@ -297,8 +327,23 @@ def main(
                     )
 
         elif "l3" in each_file.stem.lower():
-            # FIXME - pipeline L3 file format does not match Brent's latest?
-            # L3 files do not yet seem to have any of the common metadata or variables?
+            # TODO # L3 files do not yet have any of the common metadata or variables?
+
+            # TODO: Grab pipeleine version info fromm corresponding L2 file as it is not
+            # yet incorporated in this product level. REMOVE once product files have
+            # been updated.
+            source_l2 = each_file.as_posix().replace("l3", "l2")
+            try:
+                with Dataset(source_l2, mode="r") as l2_data:
+                    git_branch = f"{l2_data['Configuration/git_branch'][:]}"
+                    git_commit = f"{l2_data['Configuration/git_hash'][:]}"
+            except Exception as exc:
+                logger.warning("Unable to get commit & hash from source L2 file:")
+                logger.warning(f"==> {source_l2}")
+                logger.warning(f"Exception was: {exc}")
+                git_branch = None
+                git_commit = None
+
             with Dataset(each_file, mode="r") as nc_data:
                 try:
                     nobs = nc_data["l2_data/time_utc"].size
@@ -313,11 +358,13 @@ def main(
                         f"Problem file (time={nobs}): {Path(each_file).as_posix()}"
                     )
                     continue
-                plot_L3_Bdown.plot_b_1D_maps_with_time(
+                gw_plot_methods.plot_b_1D_maps_with_time(
                     nc_data=nc_data,
                     source=each_file,
                     save_directory=out_dir_path,
                     south_inverted=True,
+                    git_branch=git_branch,  # Not yet in L3 product, borrowed from L2
+                    git_commit=git_commit,  # Not yet in L3 product, borrowed from L2
                     overwrite=overwrite,
                     dark_mode=dark_mode,
                     figure_dpi=200,  # FIXME - What Brent was using, keep for now
