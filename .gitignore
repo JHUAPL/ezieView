@@ -48,6 +48,10 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Locally generated log and plot outputs directories
+logs/
+outputs/
+
 # Locally cached NAIF/SPICE kernels
 lsk/
 pck/

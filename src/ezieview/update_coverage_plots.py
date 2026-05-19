@@ -943,7 +943,7 @@ def main(
     Example command line--run from repo root, in an activated python venv:
 
     \b
-    glow_daily \\
+    view_coverage \\
         -d0 2025-06-20 \\
         -d1 2025-06-22 \\
         -fd '/project/ezie/data/l1' \\

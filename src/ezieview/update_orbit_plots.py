@@ -109,7 +109,7 @@ def main(
     Example command line--run from repo root, in an activated python venv:
 
     \b
-    glow_orbit \\
+    view_orbits \\
         -d0 2025-06-20 \\
         -d1 2025-06-22 \\
         -fd '/project/ezie/data/l2' \\

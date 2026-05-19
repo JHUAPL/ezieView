@@ -32,8 +32,8 @@ dependencies = [
 # script-files = [ "make_ezie_images.sh" ]
 
 [project.scripts]
-glow_daily = "ezieview.update_coverage_plots:main" 
-glow_orbit = "ezieview.update_orbit_plots:main" 
+view_coverage = "ezieview.update_coverage_plots:main" 
+view_orbits = "ezieview.update_orbit_plots:main" 
 
 [tool.setuptools.package-data]
 "ezieview.binary-assets" = ["*.png"]
@@ -56,15 +56,15 @@ license-files = ["LICENSE.md"]
 # ]
 
 [project.urls]
-Source = "https://bitbucket.org/aplkaiju/glow/"
+Source = "https://bitbucket.org/aplkaiju/ezieview/"
+"Science Gateway" = "https://eziegw.jhuapl.edu"
 
 # The following still TBD
-# Homepage = "https://bitbucket.org/aplkaiju/???/"
-# "Science Gateway" = "https://eziegw.jhuapl.edu"
-# Documentation = "https://ezieAsPy.readthedocs.io/"
-# "Bug Tracker" = "https://github.com/JHUAPL/ezieAsPy/issues"
-# Discussions = "https://github.com/JHUAPL/ezieAsPy/discussions"
-# Changelog = "https://ezieAsPy.readthedocs.io/en/latest/changelog.html"
+# Homepage = "https://bitbucket.org/aplkaiju/ezieview/"
+# Documentation = "https://ezieview.readthedocs.io/"
+# Changelog = "https://ezieview.readthedocs.io/en/latest/changelog.html"
+# "Bug Tracker" = "https://github.com/JHUAPL/ezieview/issues"
+# Discussions = "https://github.com/JHUAPL/ezieview/discussions"
 
 # [development-groups]
 # tests = ["pytest", "pytest-cov"]
