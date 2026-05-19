@@ -7,12 +7,12 @@ import click
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from netCDF4 import Dataset
 
 from ezieview.ezvislib import gw_logger
 from ezieview.ezvislib.gw_plot_methods import (
     coverage_plot_polar_layout,
     coverage_plot_stereographic_layout,
+    ingest_full_day_all_sv,
     mollweide_layout,
     save_close_figure,
 )
@@ -63,145 +63,6 @@ from ezieview.ezvislib.gw_plot_utils import (
 
 mpl.use("Agg")
 logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
-
-
-def ingest_full_day_all_sv(
-    run_date: str,  # YYYYMMDD
-    used_files: list,  # list of L1 paths
-):
-    """
-    Ingest and aggregate geolocation and metadata data from all EZIE Level-1 files
-    for a specified date across all spacecraft (~15 orbits each).
-
-    This function processes a list of L1 NetCDF files, extracts relevant variables
-    (such as satellite latitude/longitude, MEM observation coordinates, magnetic
-    latitude, MLT, and solar zenith angles), and combines them into a unified
-    dictionary containing data for all orbits of the day.
-
-    Parameters
-    ----------
-    run_date : str
-        The date to process, formatted as 'YYYYMMDD'.
-    used_files : list
-        A list of file paths (Path objects or strings) pointing to the L1 NetCDF
-        files to be ingested.
-
-    Returns
-    -------
-    tuple
-        A tuple containing:
-        - full_day (dict): A dictionary where keys are variable names (e.g., 'sat_lat',
-          'obs_maglat1') and values are numpy arrays of the aggregated data for all
-          spacecraft and orbits on the given date.
-        - uniq_svid (numpy.ndarray): An array of unique spacecraft identifiers found
-          in the processed files.
-        - uniq_orbs (numpy.ndarray): An array of unique orbit numbers found in the
-          processed files.
-    """
-
-    # Generate dictionary of all locations sampled by the EZIE spacecraft in the course
-    # of one day. The dictionary key hierarchy is:
-    # 1) SV
-    # 2) L1 var names (from coverage_db_list below)
-    coverage_db_list = [
-        "/Metadata/SpaceVehicle",
-        "/Science/orbit_number",
-        "/Geolocation/sat_lat",
-        "/Geolocation/sat_lon",
-        "/Geolocation/obs_lat1",
-        "/Geolocation/obs_lat2",
-        "/Geolocation/obs_lat3",
-        "/Geolocation/obs_lat4",
-        "/Geolocation/obs_lon1",
-        "/Geolocation/obs_lon2",
-        "/Geolocation/obs_lon3",
-        "/Geolocation/obs_lon4",
-        "/Geolocation/obs_solar_zen1",
-        "/Geolocation/obs_solar_zen2",
-        "/Geolocation/obs_solar_zen3",
-        "/Geolocation/obs_solar_zen4",
-        "/MagneticCoords/obs_maglat1",
-        "/MagneticCoords/obs_maglat2",
-        "/MagneticCoords/obs_maglat3",
-        "/MagneticCoords/obs_maglat4",
-        "/MagneticCoords/obs_magLT1",
-        "/MagneticCoords/obs_magLT2",
-        "/MagneticCoords/obs_magLT3",
-        "/MagneticCoords/obs_magLT4",
-    ]
-
-    date_dict = {}
-    full_day = {}
-    for each_file in used_files:
-        # Ingest latest version/revision L1 file for each SV
-        prsd = parse_ezie_product_name(each_file)
-        if prsd.date != run_date:
-            continue
-
-        # Gather entries for ALL orbits by this SV on this date
-        if prsd.spcv not in date_dict.keys():
-            date_dict[prsd.spcv] = {}
-        if "l1" in each_file.stem.lower():
-            try:
-                with Dataset(each_file, mode="r") as nc_data:
-                    product = nc_data.getncattr("product")
-                    if product == "L1":
-                        logger.info(f"Processing {product} file {Path(each_file).name}")
-
-                        if prsd.orbt not in date_dict[prsd.spcv].keys():
-                            date_dict[prsd.spcv][prsd.orbt] = {}
-                        for dbvar in coverage_db_list:
-                            try:
-                                date_dict[prsd.spcv][prsd.orbt][dbvar] = nc_data[dbvar][
-                                    :
-                                ].data
-                            except AttributeError:
-                                date_dict[prsd.spcv][prsd.orbt][dbvar] = np.repeat(
-                                    str(nc_data[dbvar][:]),
-                                    nc_data.dimensions["ObsRate"].size,
-                                )
-                    else:
-                        logger.error(f"{product} misidentified as L1-skipping")
-                        date_dict[prsd.spcv][prsd.orbt][dbvar] = None
-            except Exception as exc:
-                logger.error(f"Unrecoverable problem, skipping file: {exc}")
-                date_dict[prsd.spcv][prsd.orbt][dbvar] = None
-
-    # Combine entries from each SV/L1 file into single unified dictionary
-    for sv_id, sv_dict in date_dict.items():
-        for orb_id, orb_dict in sv_dict.items():
-            for dbvar in coverage_db_list:
-                full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-                if full_key not in full_day.keys():
-                    full_day[full_key] = []
-                try:
-                    if orb_dict[dbvar] is not None:
-                        full_day[full_key].extend(orb_dict[dbvar])
-                except Exception as exc:
-                    logger.error(
-                        f"Selected field could not be extracted from file: {exc}"
-                    )
-
-    # Recast each dictionary value (list) as a numpy array
-    for sv_id, sv_dict in date_dict.items():
-        for orb_id, orb_dict in sv_dict.items():
-            for dbvar in coverage_db_list:
-                full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-                full_day[full_key] = np.array(full_day[full_key])
-
-    # FIXME: Not in .nc4 files! Borrowing MEM 1.
-    # FIXME: Have these added to netcdf products? Otherwise must compute w/SPICE _here_.
-    full_day["sat_mlat"] = full_day["obs_maglat1"]
-    full_day["sat_MLT"] = full_day["obs_magLT1"]
-
-    # Get unique values of orbits and SVs
-    uniq_svid = np.unique(full_day["SpaceVehicle"])
-    uniq_orbs = np.unique(full_day["orbit_number"])
-
-    logger.info(f"Distinct orbit numbers: {[int(_) for _ in uniq_orbs]!r}")
-    logger.info(f"Distinct space vehicles: {[str(_) for _ in uniq_svid]!r}")
-
-    return full_day, uniq_svid, uniq_orbs
 
 
 def plot_mlt_sza_coverage(
