@@ -808,12 +808,20 @@ def plot_calibration(
     # Plot only times when the acquisition mode is SCIENCE
     obs_flg = nc_data["ChannelOrderedCounts/acquisition_mode"][:] == SCIENCE
     i0, i1 = np.argmax(obs_flg), obs_flg.size - np.argmax(obs_flg[::-1])
-    time_utc = time_utc[i0:i1]
-    logger.debug(f"{obs_flg.size} - {i0} : {i1}")
+    # Truncated per-orbit L1 file may end while SCIENCE mode flag is still turned on.
+    if i1 == obs_flg.size:
+        i1 -= 1  # Adjust end of range when this occurs
 
+    # logger.debug(f"{obs_flg[0:10]}")
+    # logger.debug(f"{obs_flg[i0]}")
+    # logger.debug(f"{obs_flg[i1 - 1]}")
+    # logger.debug(f"{obs_flg[-10:]}")
+    # logger.debug(f"{obs_flg.size} - {i0} : {i1}")
+
+    time_utc = time_utc[i0:i1]
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
     product = nc_data.getncattr("product")
-    orb_num = nc_data["Science/orbit_number"][i0]
+    orb_num = nc_data["Science/orbit_number"][i0]  # Always use starting orbit number?
 
     t_kinds = ["TA", "TB"]
     # t_kinds = ["TB"]
@@ -848,6 +856,10 @@ def plot_calibration(
     f1 = min(len(freq_mhz_delta), fc + FREQ_BIN_DELTA)
     freq_mhz_delta = freq_mhz_delta[f0:f1]
     tgrd = np.tile(time_utc, (freq_mhz_delta.shape[0], 1)).T
+    logger.debug(
+        f"{freq_mhz_delta.shape} {tgrd.shape} "
+        f"{nc_data['CalibratedSceneTemperatures/tb1'][i0:i1, f0:f1, 0].shape}"
+    )
 
     if not t_diff:
         cmap = mpl.colormaps["viridis"]
@@ -913,9 +925,6 @@ def plot_calibration(
                     data -= data[0, :]
 
                 # TODO - Mask off time steps where we were not in EARTHLOOK mode?
-                logger.info(
-                    f"{freq_mhz_delta.shape} {tgrd.shape} {data[:, f0:f1].shape}"
-                )
                 tb_mesh = ax.pcolormesh(
                     freq_mhz_delta,
                     tgrd,
