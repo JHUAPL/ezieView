@@ -847,6 +847,7 @@ def plot_calibration(
     f0 = max(0, fc - FREQ_BIN_DELTA)
     f1 = min(len(freq_mhz_delta), fc + FREQ_BIN_DELTA)
     freq_mhz_delta = freq_mhz_delta[f0:f1]
+    tgrd = np.tile(time_utc, (freq_mhz_delta.shape[0], 1)).T
 
     if not t_diff:
         cmap = mpl.colormaps["viridis"]
@@ -910,10 +911,12 @@ def plot_calibration(
                 data = nc_data[var_name][i0:i1, :, col]  # Shape: (ObsRate, Freq_Array)
                 if t_diff:
                     data -= data[0, :]
-                tgrd = np.tile(time_utc, (freq_mhz_delta.shape[0], 1)).T
 
                 # TODO - Mask off time steps where we were not in EARTHLOOK mode?
-                c = ax.pcolormesh(
+                logger.info(
+                    f"{freq_mhz_delta.shape} {tgrd.shape} {data[:, f0:f1].shape}"
+                )
+                tb_mesh = ax.pcolormesh(
                     freq_mhz_delta,
                     tgrd,
                     data[:, f0:f1],
@@ -947,7 +950,7 @@ def plot_calibration(
             ax = axs[num_rows, col]  # axis row just for colorbar
             ax.set_axis_off()  # turn off visible axes components
             _cbar = plt.colorbar(
-                c,
+                tb_mesh,
                 ax=ax,
                 orientation="horizontal",
                 location="bottom",
