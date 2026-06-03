@@ -69,10 +69,18 @@ from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
     """,
 )
 @click.option(
+    "-merged",
+    "--merged_l2_l3",
+    default=False,
+    type=bool,
+    is_flag=True,
+    help="Generate a figure with both L2 and L3 results plotted",
+)
+@click.option(
     "-over",
     "--overwrite",
     type=bool,
-    help="Overwrite existing files. If not set, any existing files will be skipped ",
+    help="Overwrite existing files. If not set, any existing files will be skipped",
 )
 @click.option(
     "-dm",
@@ -87,18 +95,19 @@ from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
     "--figure_dpi",
     type=int,
     default=DFLT_RES,
-    help=f"Generate plots at specified DPI rather than default value of {DFLT_RES} ",
+    help=f"Generate plots at specified DPI rather than default value of {DFLT_RES}",
 )
 # endregion cli
 def main(
-    start_date,
-    stop_date,
-    file_directory,
-    file_pattern,
-    plots_directory,
-    overwrite,
-    dark_mode,
-    figure_dpi,
+    start_date: datetime.datetime,
+    stop_date: datetime.datetime,
+    file_directory: str,
+    file_pattern: str,
+    plots_directory: str,
+    merged_l2_l3: bool,
+    overwrite: bool,
+    dark_mode: bool,
+    figure_dpi: int,
 ) -> int:
     """
     Generate a set of EZIE single-orbit summary plots based on the specified date and
@@ -206,7 +215,7 @@ def main(
                 if product == "L1":
                     logger.info(f"Processing {product} file {Path(each_file).name}")
 
-                    # TODO: Grab pipeleine version info fromm corresponding L2 file as
+                    # TODO: Grab pipeline version info fromm corresponding L2 file as
                     # it is not yet incorporated in this product level. REMOVE once
                     # product files have been updated.
                     prsd = parse_ezie_product_name(each_file)
@@ -294,7 +303,7 @@ def main(
                         f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
                     )
                     continue
-                if nc_data.getncattr("product") == "L2":
+                if nc_data.getncattr("product") == "L2" and not merged_l2_l3:
                     logger.info(f"Processing L2 file {Path(each_file).name}")
 
                     gw_plot_methods.plot_retrieved_bd_only(
@@ -321,6 +330,19 @@ def main(
                         dark_mode=dark_mode,
                     )  # Requires L2 or higher level products files
 
+                elif nc_data.getncattr("product") == "L2" and merged_l2_l3:
+                    gw_plot_methods.plot_retrieved_B_and_J(
+                        nc2_data=nc_data,
+                        nc2_sorc=each_file,
+                        save_directory=out_dir_path,
+                        version=version,
+                        mode="Corrected",
+                        south_inverted=True,  # Use heliospheric community mapping style
+                        overwrite=overwrite,
+                        figure_dpi=300,
+                        dark_mode=dark_mode,
+                    )  # Requires L2 or higher level products files
+
                 else:
                     logger.error(
                         f"{nc_data.getncattr('product')} misidentified as L2-skipping"
@@ -329,7 +351,7 @@ def main(
         elif "l3" in each_file.stem.lower():
             # TODO # L3 files do not yet have any of the common metadata or variables?
 
-            # TODO: Grab pipeleine version info fromm corresponding L2 file as it is not
+            # TODO: Grab pipeline version info fromm corresponding L2 file as it is not
             # yet incorporated in this product level. REMOVE once product files have
             # been updated.
             source_l2 = each_file.as_posix().replace("l3", "l2")

@@ -19,6 +19,7 @@ import netCDF4
 import numpy as np
 from apexpy import Apex
 from netCDF4 import Dataset
+from PIL import Image
 
 from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 
@@ -765,13 +766,17 @@ def map_magnetic_continents(
     logger.info(f"Elapsed time: {end - bgn:.2f} seconds")
 
 
-def overlay_ezie_logo(fig):
+def overlay_ezie_logo(
+    fig: plt.Figure,
+    dark_mode: bool = False,
+):
     """
     Overlay EZIE logo in top left corner of figure (fig)
     """
     # Overlay EZIE logo
+    img_name = "ezie_logo_no_bg.png" if not dark_mode else "ezie_logo_light.png"
     ezie_logo_img = plt.imread(
-        Path(__file__).parent.parent / "binary-assets" / "ezie_logo_no_bg.png"
+        Path(__file__).parent.parent / "binary-assets" / img_name
     )
     img_aspect_ratio = ezie_logo_img.shape[1] / ezie_logo_img.shape[0]
     hi = 0.07
@@ -786,6 +791,7 @@ def add_product_metadata(
     fig: plt.Figure,
     nc_data: Dataset,
     source: Path,
+    second: bool = False,
     size: str = "small",
 ):
     """
@@ -819,11 +825,11 @@ def add_product_metadata(
     #     f"Source Directory: {source.parent!s}" if source.parent is not None else ""
     # )
     fig.text(
-        0.005,
+        0.005 if not second else 0.60,
         0.005,
         # f"Data Version: {ver_str} Revision: {rev_str} Created: {created}   {src_str}",
         f"Data Source: {source.name}  Source created at: {created}",
-        ha="left",
+        ha="left" if not second else "center",
         va="bottom",
         rotation=0,
         weight="bold",
@@ -1032,7 +1038,6 @@ def read_png_metadata(filename: Path | str):
     Returns:
         dict: Dictionary containing any text fields found in the PNG file's metadata
     """
-    from PIL import Image
 
     img = Image.open(filename)
     metadata = {}
@@ -1074,6 +1079,13 @@ def save_close_figure(
         3) L2 and L3 plots are generated on a single orbit basis, and all required plot
            naming parameters can be extracted from the source file name.
     """
+
+    old_hash = None
+    if source is not None:
+        new_hash = hash_ezie_data_product(source=source)
+    else:
+        new_hash = None
+
     if old_format:
         od_path = save_directory / obs_date.strftime("%Y-%j-%m-%d")
         if not od_path.exists():
@@ -1122,10 +1134,18 @@ def save_close_figure(
                 f"ezie_{obs_date.strftime('%Y%m%d')}_"
                 f"{tstmp_str}{spacecraft_str}{version_str}{plot_type}.png"
             )
+        if fig_path.exists():
+            # Open image and access metadata (PNG text chunks)
+            img = Image.open(fig_path)
+            metadata = img.text
+            logger.debug(f"{type(metadata)}")
+            logger.debug(f"{metadata!s}")
+            if "EZIE Source Hash" in metadata.keys():
+                old_hash = metadata["EZIE Source Hash"]
 
     if name_only:
         logger.debug(f"Figure path would be: {fig_path.name}")
-        return fig_path
+        return fig_path, old_hash, new_hash
 
     # Plot creation and modification times are already in the standard PNG metadata:
     #   Properties:
@@ -1133,13 +1153,10 @@ def save_close_figure(
     #     date:modify: 2026-03-07T02:38:41+00:00
     #     date:timestamp: 2026-03-07T02:41:33+00:00
     if source is not None:
-        metadata = {
-            # "EZIE Plot Creation Time": datetime.datetime.now(tz=datetime.UTC).isoformat(
-            #     timespec="seconds"
-            # ),
-            "EZIE Source File": source.name,
-            "EZIE Source Hash": hash_ezie_data_product(source=source),
-        }
+        # "EZIE Plot Creation Time": datetime.datetime.now(tz=datetime.UTC).isoformat(
+        #     timespec="seconds"
+        # ),
+        metadata = {"EZIE Source File": source.name, "EZIE Source Hash": new_hash}
     else:
         metadata = None
     try:

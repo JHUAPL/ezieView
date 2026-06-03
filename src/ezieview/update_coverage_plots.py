@@ -113,14 +113,14 @@ def plot_mlt_sza_coverage(
         for cvrg_indx, cvrg_type in enumerate(COVERAGE_TYPES):
             cvrg_type_str = cvrg_type.lower().replace(" ", "-")
             plot_type = f"{regn.lower()}-mem-coverage-{cvrg_type_str}"
-            fig_path = save_close_figure(
+            fig_path, _old_hash, _new_hash = save_close_figure(
                 obs_date=obs_date,
                 plot_type=plot_type,
                 save_directory=output_dir,
                 dark_mode=dark_mode,
                 dpi=figure_dpi,
                 name_only=True,
-            )
+            )  # No source hash is saved for these multi-source plots
 
             if fig_path.exists() and not overwrite:
                 logger.info(f"Skipping existing file: {fig_path.name}")
@@ -429,7 +429,7 @@ def plot_daily_maps(
                     # Uses MLT kludge instead of longitude
 
                 plot_type = f"{regn.lower()}-{ptype}"
-                fig_path = save_close_figure(
+                fig_path, _old_hash, _new_hash = save_close_figure(
                     obs_date=obs_date,
                     plot_type=plot_type,
                     save_directory=output_dir,
@@ -654,7 +654,7 @@ def plot_daily_maps(
             ymem = mem_lat
 
             plot_type = f"equatorial-{ptype}"
-            fig_path = save_close_figure(
+            fig_path, _old_hash, _new_hash = save_close_figure(
                 obs_date=obs_date,
                 plot_type=plot_type,
                 save_directory=output_dir,
