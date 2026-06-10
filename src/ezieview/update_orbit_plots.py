@@ -167,6 +167,17 @@ def main(
             f"Found {len(keep_files)} files matching specified pattern and date range"
         )
 
+    # Change file sorting from a purely lexicographical order (including the full path!)
+    # to a sort based on date and time primarily and SV only secondarily.
+    # TBD: Process oldest data first? Use srt_list
+    # TBD: Process newest data first? Use srt_list[::-1]
+    new_list = []
+    for ndx, each_file in enumerate(keep_files):
+        prsd = parse_ezie_product_name(each_file)
+        new_list.append((ndx, prsd.spcv, prsd.dttm))
+    srt_list = sorted(new_list, key=lambda f: (f[2], f[1]))
+    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::-1]]
+
     # Create output directory for storage of plot files if it does not already exist
     out_dir_path = Path(plots_directory)
     if not out_dir_path.exists():
@@ -188,7 +199,6 @@ def main(
     #     logger.info(f"File   {file}")
     #     logger.info(f"Type   {ktype}")
 
-    keep_files = keep_files[::-1]  # FIXME: Process newest data first? OPTIONAL
     for each_file in keep_files:
         prsd = parse_ezie_product_name(each_file)
         if str(prsd.vrsn) == "nan":

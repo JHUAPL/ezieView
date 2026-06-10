@@ -1453,6 +1453,7 @@ def plot_retrieved_bd_only(
         ]
         plot_type = f"retrieved_{mode.lower()}_b_fields_dBs"
 
+    logger.debug(f"spacecraft ID is {sc_id}")
     ftgt, old_hash, new_hash = save_close_figure(
         source=source,
         save_directory=save_directory,
