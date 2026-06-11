@@ -73,7 +73,6 @@ from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
     "--merged_l2_l3",
     default=False,
     type=bool,
-    is_flag=True,
     help="Generate a figure with both L2 and L3 results plotted",
 )
 @click.option(

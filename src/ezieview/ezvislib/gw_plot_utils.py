@@ -844,21 +844,27 @@ def add_pipeline_metadata(
     git_commit: str | None = None,
     size: str = "small",
 ):
+    EMPTY_FIELD: str = "Empty"
+    MISSING_FIELD: str = "Unavailable"
     try:
         pipeline_branch = f"{nc_data['Configuration/git_branch'][:]}"
         commit_hash = f"{nc_data['Configuration/git_hash'][:]}"
         if pipeline_branch == "":
-            pipeline_branch = "?"
+            pipeline_branch = EMPTY_FIELD
         if commit_hash == "":
-            commit_hash = "?"
+            commit_hash = EMPTY_FIELD
     except KeyError:
-        pipeline_branch = "Unavailable"
-        commit_hash = "Unavailable"
+        pipeline_branch = MISSING_FIELD
+        commit_hash = MISSING_FIELD
     # Allow override of values in data product, e.g., for using L2 product values for
     # currently undefined L3 product pipeline info fields.
-    if git_branch is not None:
+    if (git_branch is not None) and (
+        (pipeline_branch == EMPTY_FIELD) or (pipeline_branch == MISSING_FIELD)
+    ):
         pipeline_branch = git_branch
-    if git_commit is not None:
+    if (git_commit is not None) and (
+        (commit_hash == EMPTY_FIELD) or (commit_hash == MISSING_FIELD)
+    ):
         commit_hash = git_commit
     fig.text(
         0.995,

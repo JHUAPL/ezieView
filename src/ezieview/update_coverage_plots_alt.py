@@ -56,7 +56,7 @@ from ezieview.ezvislib.gw_plot_params import (
     UTC_TZ,
 )
 from ezieview.ezvislib.gw_plot_utils import (
-    filter_daily_files_by_version,
+    filter_files_by_version,
     parse_ezie_product_name,
 )
 
@@ -77,7 +77,6 @@ def plot_mlt_sza_coverage(
     mem_sza: np.ndarray,
     mem_mode: np.ndarray,  # EARTHLOOK or SKYLOOK or ???
     output_dir: Path,
-    # regions: list,
     dark_mode: bool = False,
     overwrite: bool = False,
     dpi: int = DFLT_RES,
@@ -99,7 +98,7 @@ def plot_mlt_sza_coverage(
     for cvrg_indx, cvrg_type in enumerate(COVERAGE_TYPES):
         cvrg_type_str = cvrg_type.lower().replace(" ", "-")
         plot_type = f"global-mem-coverage-{cvrg_type_str}"
-        fig_path = save_close_figure(
+        fig_path, _old_hash, _new_hash = save_close_figure(
             obs_date=obs_date,
             plot_type=plot_type,
             save_directory=output_dir,
@@ -333,7 +332,6 @@ def plot_daily_maps(
     mem_MLT: np.ndarray,
     mem_mode: np.ndarray,  # EARTHLOOK or SKYLOOK or ???
     output_dir: Path,
-    # regions: list,
     south_inverted: bool = False,
     overwrite: bool = False,
     dark_mode: bool = False,
@@ -386,7 +384,7 @@ def plot_daily_maps(
         mem_obs_locn_mag,
     ]:
         plot_type = f"global-{ptype}"
-        fig_path = save_close_figure(
+        fig_path, _old_hash, _new_hash = save_close_figure(
             obs_date=obs_date,
             plot_type=plot_type,
             save_directory=output_dir,
@@ -489,6 +487,7 @@ def plot_daily_maps(
                 lat_lower_limit, 90.0, 10.0
             )  # Lats at which to draw gridlines
             mlat_min, mlat_max = -45, +45
+            mlat_min, mlat_max = -55, +55
 
             for sndx, spcrft in enumerate(SPACECRAFT):
                 unique_orbits = np.unique(orbit)
@@ -975,11 +974,12 @@ def main(
         logger.info(f"{nam:18s} : {val}")
 
     # Create list of highest version/revision for a given spacecraft and date.
-    keep_files = filter_daily_files_by_version(
+    keep_files = filter_files_by_version(
         file_directory=file_directory,
         file_pattern=file_pattern,
         start_date=start_date,
         stop_date=stop_date,
+        remove_near_dupes=True,
     )
 
     if keep_files is None:
