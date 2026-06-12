@@ -25,6 +25,7 @@ dependencies = [
   "netCDF4",
   "numpy",
   "requests",
+  "scipy",
   "spiceypy",
 ]
 
