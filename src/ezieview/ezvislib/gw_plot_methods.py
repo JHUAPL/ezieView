@@ -9,7 +9,7 @@ the organic mess that grew out of shifting requirements over the last two years)
 that is done, the methods specific to a single type of plot should probably be moved to
 their respective update_*_plots.py files in their presumably slimmed down new forms.
 This file should contain only the methods common to all, and the gw_*.py routines are
-already used by both the gateway plotting codes and various analysis coes, e.g., for
+already used by both the gateway plotting codes and various analysis codes, e.g., for
 sci-ops investigations (star tracker loss of lock, etc.).
 """
 

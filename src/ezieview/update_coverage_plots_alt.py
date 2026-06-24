@@ -899,7 +899,7 @@ def plot_daily_maps(
 @click.option(
     "-fp",
     "--file_pattern",
-    default="ezie_l*.nc4",
+    default="ezie_l1_*.nc4",
     help="""
 Pattern of file path to be searched for EZIE input files, e.g., "ezie_l2\\*.nc4"
 Note that you MUST escape all wildcard characters!

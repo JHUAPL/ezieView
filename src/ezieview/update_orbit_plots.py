@@ -220,33 +220,34 @@ def main(
                         f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
                     )
                     continue
+
                 product = nc_data.getncattr("product")
                 if product == "L1":
                     logger.info(f"Processing {product} file {Path(each_file).name}")
 
-                    # TODO: Grab pipeline version info fromm corresponding L2 file as
-                    # it is not yet incorporated in this product level. REMOVE once
-                    # product files have been updated.
-                    prsd = parse_ezie_product_name(each_file)
-                    source_l2 = (
-                        each_file.as_posix()
-                        .replace("l1/orbit", "l2")
-                        .replace("ezie_l1", "ezie_l2")
-                        .replace(f"_{prsd.orbt}", "")
-                    )
+                    #     # TODO: Grab pipeline version info from corresponding L2 file as
+                    #     # it is not yet incorporated in this product level. REMOVE once
+                    #     # product files have been updated.
+                    #     git_branch = None
+                    #     git_commit = None
+                    #     prsd = parse_ezie_product_name(each_file)
+                    #     source_l2 = (
+                    #         each_file.as_posix()
+                    #         .replace("l1/orbit", "l2")
+                    #         .replace("ezie_l1", "ezie_l2")
+                    #         .replace(f"_{prsd.orbt}", "")
+                    #     )
 
-                    try:
-                        with Dataset(source_l2, mode="r") as l2_data:
-                            git_branch = f"{l2_data['Configuration/git_branch'][:]}"
-                            git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-                    except Exception as exc:
-                        logger.warning(
-                            "Unable to get commit & hash from source L2 file:"
-                        )
-                        logger.warning(f"==> {source_l2}")
-                        logger.warning(f"Exception was: {exc}")
-                        git_branch = None
-                        git_commit = None
+                    #     try:
+                    #         with Dataset(source_l2, mode="r") as l2_data:
+                    #             git_branch = f"{l2_data['Configuration/git_branch'][:]}"
+                    #             git_commit = f"{l2_data['Configuration/git_hash'][:]}"
+                    #     except Exception as exc:
+                    #         logger.warning(
+                    #             "Unable to get commit & hash from source L2 file:"
+                    #         )
+                    #         logger.warning(f"==> {source_l2}")
+                    #         logger.warning(f"Exception was: {exc}")
 
                     # Slice out the time intervals during which we may have had MEM
                     # observations.
@@ -267,8 +268,8 @@ def main(
                                 save_directory=out_dir_path,
                                 t_diff=t_diff,
                                 overwrite=overwrite,
-                                git_branch=git_branch,
-                                git_commit=git_commit,
+                                # git_branch=git_branch,
+                                # git_commit=git_commit,
                                 dark_mode=dark_mode,
                                 figure_dpi=figure_dpi,
                             )
@@ -279,8 +280,8 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
-                            git_branch=git_branch,
-                            git_commit=git_commit,
+                            # git_branch=git_branch,
+                            # git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L0A or higher level product file
@@ -291,8 +292,8 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
-                            git_branch=git_branch,
-                            git_commit=git_commit,
+                            # git_branch=git_branch,
+                            # git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L1 or higher level product files

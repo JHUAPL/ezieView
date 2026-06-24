@@ -1143,11 +1143,14 @@ def save_close_figure(
         if fig_path.exists():
             # Open image and access metadata (PNG text chunks)
             img = Image.open(fig_path)
-            metadata = img.text
-            logger.debug(f"{type(metadata)}")
-            logger.debug(f"{metadata!s}")
-            if "EZIE Source Hash" in metadata.keys():
-                old_hash = metadata["EZIE Source Hash"]
+            try:
+                metadata = img.text
+                logger.debug(f"{type(metadata)}")
+                logger.debug(f"{metadata!s}")
+                if "EZIE Source Hash" in metadata.keys():
+                    old_hash = metadata["EZIE Source Hash"]
+            except Exception as exc:
+                logger.warning(f"{exc}: Unable to read image metadata, will regenerate")
 
     if name_only:
         logger.debug(f"Figure path would be: {fig_path.name}")
