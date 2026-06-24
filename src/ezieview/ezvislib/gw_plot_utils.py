@@ -157,7 +157,19 @@ def extract_science_passes(nc_data: netCDF4.Dataset):
 def jpl_safe_datetime(
     datestr: str,
     timestr: str,
-):
+) -> datetime.datetime:
+    """
+    Fix cases where we've received L1 files with a timestamp "seconds" value of 60.
+    Presumably floating point seconds were rounded rather than truncated and not bound
+    to 0-59 domain?
+
+    Args:
+        datestr (str): String representation of calendar date in YYYYMMDD format
+        timestr (str): String representation of UTC time in HHMMSS format
+
+    Returns:
+        datetime.datetime: Adjusted valid datetime object
+    """
     try:
         # Should work with any VALID date and time strings
         date_sanitized = datetime.datetime.strptime(
@@ -186,7 +198,7 @@ def parse_ezie_product_name(source: str | Path):
     else:
         source_as_path = source
     stem = source_as_path.stem
-    # FIXME: Will need to modify this once L2 and L3 products adopt naming convention
+    # TODO: We will need to modify this once L2 and L3 products adopt naming convention
     # that includes the orbit number.
     if "l1" in stem and "orbit" in source.as_posix():
         pattern = (

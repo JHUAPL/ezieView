@@ -1,5 +1,4 @@
 [build-system]
-# requires = ["setuptools"]
 requires = ["uv_build >= 0.9.0","uv_build < 0.11"]
 build-backend = "uv_build"
 
@@ -29,6 +28,12 @@ dependencies = [
   "spiceypy",
 ]
 
+[[tool.uv.index]]
+name = "python-local"
+url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
+publish-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
+explicit = true
+
 # [tool.setuptools]
 # script-files = [ "make_ezie_images.sh" ]
 
@@ -46,6 +51,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Physics",
   "Topic :: Scientific/Engineering :: Aurora",
   "Topic :: Scientific/Engineering :: Ionosphere",
