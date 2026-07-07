@@ -1429,6 +1429,12 @@ def plot_retrieved_bd_only(
     orb_num = nc_data["Science/orbit_number"][0]
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
 
+    if orb_num == "" or sc_id == "":
+        logger.warning(
+            f"File missing basic metadata values, skipping: {source.as_posix()}"
+        )
+        return
+
     # FIXME: Attempt to trim slewing observations at start and finish
     # if len(time_utc) > 12:
     #     use_obs = np.s_[5:-5]
@@ -3025,13 +3031,19 @@ def plot_b_1D_maps_with_time(
     x0_m, y0_m = map_proj.transform_point(
         lonmid, latmid + ext_shift, src_crs=DATA_TRANSFORM
     )
-    logger.debug(
-        f"{x0_m - swath_wid} {x0_m + swath_wid} {y0_m - swath_len} {y0_m + swath_len}"
-    )
-    map_axs.set_extent(
-        (x0_m - swath_wid, x0_m + swath_wid, y0_m - swath_len, y0_m + swath_len),
-        crs=map_proj,
-    )
+    try:
+        map_axs.set_extent(
+            (x0_m - swath_wid, x0_m + swath_wid, y0_m - swath_len, y0_m + swath_len),
+            crs=map_proj,
+        )
+    except ValueError:
+        logger.error(
+            f"Invalid map extent: {x0_m - swath_wid} {x0_m + swath_wid} "
+            f"{y0_m - swath_len} {y0_m + swath_len}"
+        )
+        logger.error(f"No figure generated from L3 file: {source.as_posix()}")
+        plt.close(fig=fig)
+        return
 
     if (hemisphere == SOUTH) and south_inverted:
         logger.info("Mapping continents in reversed longitude coordinates")
@@ -3434,6 +3446,11 @@ def plot_retrieved_B_and_J(
         None
     """
     nc3_sorc: Path = Path(nc2_sorc.as_posix().replace("l2", "l3"))
+    if not nc3_sorc.exists():
+        logger.error(
+            f"L3 corresponding to supplied L2 absent, skipping: {nc3_sorc.as_posix()}"
+        )
+        return
 
     if dark_mode:
         plt.style.use("dark_background")
@@ -3455,6 +3472,12 @@ def plot_retrieved_B_and_J(
     t_stamp = time_utc[0].strftime("%H%M%S")
     orb_num = nc2_data["Science/orbit_number"][0]
     sc_id = nc2_data["Metadata/SpaceVehicle"][0]
+
+    if orb_num == "" or sc_id == "":
+        logger.warning(
+            f"File missing basic metadata values, skipping: {nc2_sorc.as_posix()}"
+        )
+        return
 
     # FIXME: Attempt to trim slewing observations at start and finish
     # if len(time_utc) > 12:

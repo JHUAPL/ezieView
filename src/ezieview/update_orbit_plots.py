@@ -78,6 +78,7 @@ from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
 @click.option(
     "-over",
     "--overwrite",
+    default=False,
     type=bool,
     help="Overwrite existing files. If not set, any existing files will be skipped",
 )
