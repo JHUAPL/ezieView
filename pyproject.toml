@@ -6,9 +6,7 @@ build-backend = "uv_build"
 name = "ezieView"
 version = "0.0.1"
 authors = [
-  { name = "Rafael Mesquita", email = "Rafael.Mesquita@jhuapl.edu" },
-  { name = "Brent Smith", email = "Brent.Smith@jhuapl.edu" },
-  { name = "Brian Wolven", email = "Brian.Wolven@jhuapl.edu" },
+  { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
 ]
 description = "Plotting routines for the EZIE Level 1, 2, and 3 data products"
 readme = "README.md"
@@ -34,6 +32,7 @@ url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
 publish-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
 explicit = true
 
+# Just put example script in README? TBD
 # [tool.setuptools]
 # script-files = [ "make_ezie_images.sh" ]
 
@@ -58,22 +57,17 @@ classifiers = [
 ]
 license = ["BSD 3-Clause"]
 license-files = ["LICENSE.md"]
-# maintainers = [
-#   { name = "Brian Wolven", email = "brian.wolven@jhuapl.edu" },
-# ]
+authors = [
+  { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
+]
 
 [project.urls]
 Source = "https://bitbucket.org/aplkaiju/ezieview/"
 "Science Gateway" = "https://eziegw.jhuapl.edu"
 
 # The following still TBD
-# Homepage = "https://bitbucket.org/aplkaiju/ezieview/"
-# Documentation = "https://ezieview.readthedocs.io/"
-# Changelog = "https://ezieview.readthedocs.io/en/latest/changelog.html"
-# "Bug Tracker" = "https://github.com/JHUAPL/ezieview/issues"
-# Discussions = "https://github.com/JHUAPL/ezieview/discussions"
-
-# [development-groups]
-# tests = ["pytest", "pytest-cov"]
-# docs = ["sphinx", "pydata-sphinx-theme"]
-# lint = ["ruff", "black"]
+# Homepage = ""
+# Documentation = ""
+# Changelog = ""
+# "Bug Tracker" = ""
+# Discussions = ""
