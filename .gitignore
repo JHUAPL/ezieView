@@ -56,3 +56,6 @@ outputs/
 lsk/
 pck/
 spk/
+
+# uv project manangement files
+uv.lock
