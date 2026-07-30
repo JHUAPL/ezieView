@@ -1420,7 +1420,7 @@ def plot_retrieved_bd_only(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {source.as_posix()}")
@@ -1591,7 +1591,7 @@ def plot_retrieved_bd_only(
                 list(b_rng[1:2])
                 + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {source.as_posix()}")
@@ -1637,7 +1637,7 @@ def plot_retrieved_bd_only(
             mem_axs.set_ylim(
                 b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {source.as_posix()}")
@@ -1734,7 +1734,7 @@ def plot_retrieved_bd_only(
     # Geodetic
     for tndx, tutc in enumerate(time_utc):
         tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
-        (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+        (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
             "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
         )
         sun_geo_tuple_rad.append(
@@ -1745,7 +1745,7 @@ def plot_retrieved_bd_only(
 
     # Compute the subsolar point in APEX magnetic coordinates
     apex = Apex(date=midpoint.year, refh=0)
-    sun_mlat, sun_mlon = apex.geo2apex(
+    _sun_mlat, sun_mlon = apex.geo2apex(
         sun_geo_lat_deg,
         sun_geo_lon_deg,
         REFERENCE_ALTITUDE_KM,
@@ -1908,7 +1908,7 @@ def map_sc_mem_footprints(
     map_axs.add_feature(
         cfeature.LAND,
         alpha=0.7 if dark_mode else 0.3,
-        facecolor="#d0c0a0" if dark_mode else "#d0c0a0",
+        facecolor="#d2c2a2" if dark_mode else "#d0c0a0",
     )
 
     gl = map_axs.gridlines(
@@ -2077,9 +2077,9 @@ def map_sc_mem_footprints_magnetic(
     )  # Lats at which to draw gridlines
 
     if south_inverted:
-        cardinal_labels = dict(south="N", north="S")
+        cardinal_labels = {"south": "N", "north": "S"}
     else:
-        cardinal_labels = dict(south="S", north="N")
+        cardinal_labels = {"south": "S", "north": "N"}
 
     lon_delta = 30.0
     gl = map_axs.gridlines(
@@ -2255,7 +2255,7 @@ def plot_mag_and_geo_maps(
 
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {source.as_posix()}")
@@ -2428,7 +2428,7 @@ def plot_mag_and_geo_maps(
     # Geodetic
     for tndx, tutc in enumerate(time_utc):
         tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
-        (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+        (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
             "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
         )
         sun_geo_tuple_rad.append(
@@ -2904,12 +2904,12 @@ def plot_b_1D_maps_with_time(
                 for _ in nc_data["/l2_data/time_utc"][:]
             ]
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Encountered exception while processing L3 file: {exc}")
         return
 
     if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
-        raise ValueError(
+        raise TypeError(
             "obs_time must contain datetime.datetime or np.datetime64 objects."
         )
 
@@ -2958,7 +2958,7 @@ def plot_b_1D_maps_with_time(
     # Compute position of sun in both geodetic and geomagnetic coordinates for the
     # observation midpoint time.
     tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
-    (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
         "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
     )
     # Get the subsolar point on the surface in geodetic coordinates
@@ -2975,7 +2975,7 @@ def plot_b_1D_maps_with_time(
         date=time_utc[midpt].year,
         refh=0,  # Leave at default (0), or set to 80 km? TBD
     )
-    sun_mag_lat_mid, sun_mag_lon_mid = apex.geo2apex(
+    _sun_mag_lat_mid, _sun_mag_lon_mid = apex.geo2apex(
         sun_geo_lat_mid,
         sun_geo_lon_mid,
         REFERENCE_ALTITUDE_KM,
@@ -3278,7 +3278,9 @@ def plot_b_1D_maps_with_time(
         source=source,
         save_directory=save_directory,
         figure=fig,
-        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT),
+        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
+            tzinfo=datetime.UTC
+        ),
         spacecraft=prsd.spcv,
         tstmp=prsd.time,
         plot_type=plot_type,
@@ -3372,7 +3374,7 @@ def ingest_full_day_all_sv(
                     if product == "L1":
                         logger.info(f"Processing {product} file {Path(each_file).name}")
 
-                        if prsd.orbt not in date_dict[prsd.spcv].keys():
+                        if prsd.orbt not in date_dict[prsd.spcv]:
                             date_dict[prsd.spcv][prsd.orbt] = {}
                         for dbvar in coverage_db_list:
                             try:
@@ -3387,13 +3389,13 @@ def ingest_full_day_all_sv(
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
                         date_dict[prsd.spcv][prsd.orbt][dbvar] = None
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.error(f"Unrecoverable problem, skipping file: {exc}")
                 date_dict[prsd.spcv][prsd.orbt][dbvar] = None
 
     # Combine entries from each SV/L1 file into single unified dictionary
-    for sv_id, sv_dict in date_dict.items():
-        for orb_id, orb_dict in sv_dict.items():
+    for sv_dict in date_dict.values():
+        for orb_dict in sv_dict.values():
             for dbvar in coverage_db_list:
                 full_key = dbvar.split("/")[-1]  # Use only variable name, not group
                 if full_key not in full_day:
@@ -3401,14 +3403,14 @@ def ingest_full_day_all_sv(
                 try:
                     if orb_dict[dbvar] is not None:
                         full_day[full_key].extend(orb_dict[dbvar])
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.error(
                         f"Selected field could not be extracted from file: {exc}"
                     )
 
     # Recast each dictionary value (list) as a numpy array
-    for sv_id, sv_dict in date_dict.items():
-        for orb_id, orb_dict in sv_dict.items():
+    for sv_dict in date_dict.values():
+        for orb_dict in sv_dict.values():
             for dbvar in coverage_db_list:
                 full_key = dbvar.split("/")[-1]  # Use only variable name, not group
                 full_day[full_key] = np.array(full_day[full_key])
@@ -3467,7 +3469,7 @@ def plot_retrieved_B_and_J(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc2_data.groups["Time"])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {nc2_sorc.as_posix()}")
@@ -3630,7 +3632,7 @@ def plot_retrieved_B_and_J(
                 list(b_rng[1:2])
                 + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {nc2_sorc.as_posix()}")
@@ -3676,7 +3678,7 @@ def plot_retrieved_B_and_J(
             mem_axs.set_ylim(
                 b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {nc2_sorc.as_posix()}")
@@ -3773,7 +3775,7 @@ def plot_retrieved_B_and_J(
     # Geodetic
     for tndx, tutc in enumerate(time_utc):
         tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
-        (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+        (subpnt, epoch, to_subpnt) = spiceypy.subslr(  # noqa: RUF059
             "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
         )
         sun_geo_tuple_rad.append(
@@ -3784,7 +3786,7 @@ def plot_retrieved_B_and_J(
 
     # Compute the subsolar point in APEX magnetic coordinates
     apex = Apex(date=midpoint.year, refh=0)
-    sun_mlat, sun_mlon = apex.geo2apex(
+    _sun_mlat, sun_mlon = apex.geo2apex(
         sun_geo_lat_deg,
         sun_geo_lon_deg,
         REFERENCE_ALTITUDE_KM,
@@ -3883,12 +3885,12 @@ def plot_retrieved_B_and_J(
                     for _ in nc3_data["/l2_data/time_utc"][:]
                 ]
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.error(f"Encountered exception while processing L3 file: {exc}")
             return
 
         if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
-            raise ValueError(
+            raise TypeError(
                 "obs_time must contain datetime.datetime or np.datetime64 objects."
             )
 
@@ -3937,7 +3939,7 @@ def plot_retrieved_B_and_J(
     # Compute position of sun in both geodetic and geomagnetic coordinates for the
     # observation midpoint time.
     tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
-    (subpnt, epoch, to_subpnt) = spiceypy.subslr(
+    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
         "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
     )
     # Get the subsolar point on the surface in geodetic coordinates
@@ -3945,20 +3947,21 @@ def plot_retrieved_B_and_J(
         subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING
     )
     sun_geo_lon_mid = np.degrees(sun_geo_tuple_rad[0])
-    sun_geo_lat_mid = np.degrees(sun_geo_tuple_rad[1])
+    # sun_geo_lat_mid = np.degrees(sun_geo_tuple_rad[1])
     if sun_geo_lon_mid > 180.0:
         sun_geo_lon_mid -= 360.0
 
+    # Save for potential later use?
     # Compute the subsolar point in APEX magnetic coordinates
-    apex = Apex(
-        date=time_utc[midpt].year,
-        refh=0,  # Leave at default (0), or set to 80 km? TBD
-    )
-    sun_mag_lat_mid, sun_mag_lon_mid = apex.geo2apex(
-        sun_geo_lat_mid,
-        sun_geo_lon_mid,
-        REFERENCE_ALTITUDE_KM,
-    )
+    # apex = Apex(
+    #     date=time_utc[midpt].year,
+    #     refh=0,  # Leave at default (0), or set to 80 km? TBD
+    # )
+    # _sun_mag_lat_mid, _sun_mag_lon_mid = apex.geo2apex(
+    #     sun_geo_lat_mid,
+    #     sun_geo_lon_mid,
+    #     REFERENCE_ALTITUDE_KM,
+    # )
 
     # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
     # to be the ACTUAL mlats for APEX, with sign appropriate for the selected hemisphere

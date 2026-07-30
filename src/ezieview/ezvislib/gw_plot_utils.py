@@ -233,7 +233,7 @@ def jpl_safe_datetime(
         date_sanitized = datetime.datetime.strptime(
             f"{datestr}_{timestr}", "%Y%m%d_%H%M%S"
         ).replace(tzinfo=datetime.UTC)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Should fix cases where seconds was set to 60. Error handling should be made
         # more general, but this'll get us past the current roadblock.
         _datestr = datestr
@@ -265,16 +265,18 @@ def parse_ezie_product_name(source: str | Path):
         )
         match = re.compile(pattern).search(stem)
         if hasattr(match, "group"):
-            parsed = dict(
-                prod=match.group(1),
-                date=match.group(2),
-                time=match.group(3),
-                orbt=match.group(4),
-                spcv=match.group(5),
-                vrsn=match.group(6),
-                rvsn=match.group(7),
-                dttm=jpl_safe_datetime(datestr=match.group(2), timestr=match.group(3)),
-            )
+            parsed = {
+                "prod": match.group(1),
+                "date": match.group(2),
+                "time": match.group(3),
+                "orbt": match.group(4),
+                "spcv": match.group(5),
+                "vrsn": match.group(6),
+                "rvsn": match.group(7),
+                "dttm": jpl_safe_datetime(
+                    datestr=match.group(2), timestr=match.group(3)
+                ),
+            }
     else:
         pattern = (
             "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})"
@@ -289,15 +291,17 @@ def parse_ezie_product_name(source: str | Path):
             logger.debug(
                 f"Parsed values for date: {match.group(2)} time: {match.group(3)}"
             )
-            parsed = dict(
-                prod=match.group(1),
-                date=match.group(2),
-                time=match.group(3),
-                spcv=match.group(4),
-                vrsn=match.group(5),
-                rvsn=match.group(6),
-                dttm=jpl_safe_datetime(datestr=match.group(2), timestr=match.group(3)),
-            )
+            parsed = {
+                "prod": match.group(1),
+                "date": match.group(2),
+                "time": match.group(3),
+                "spcv": match.group(4),
+                "vrsn": match.group(5),
+                "rvsn": match.group(6),
+                "dttm": jpl_safe_datetime(
+                    datestr=match.group(2), timestr=match.group(3)
+                ),
+            }
     if parsed is None:
         if stem != "":
             # We pass an empty string deliberately when the file filter fails to find a
@@ -305,16 +309,16 @@ def parse_ezie_product_name(source: str | Path):
             # in this case. If we fail on a non-empty string, however, we want to know
             # what is was (and why it was passed here in the first place).
             logger.error(f"Encountered exception while parsing filename: {stem}")
-        parsed = dict(
-            prod=math.nan,
-            date=math.nan,
-            time=math.nan,
-            orbt=math.nan,
-            spcv=math.nan,
-            vrsn=math.nan,
-            rvsn=math.nan,
-            dttm=math.nan,
-        )
+        parsed = {
+            "prod": math.nan,
+            "date": math.nan,
+            "time": math.nan,
+            "orbt": math.nan,
+            "spcv": math.nan,
+            "vrsn": math.nan,
+            "rvsn": math.nan,
+            "dttm": math.nan,
+        }
     return collections.namedtuple(
         "GenericDict",
         parsed.keys(),
@@ -604,7 +608,7 @@ def convert_to_mag(
             QUERY: Are there any that we use? TBD
             TODO: THIS METHOD NOT YET TESTED FOR EZIE APPLICATIONS!
             """
-            for long, lat, alt4mag in coords:
+            for long, lat, _alt4mag in coords:
                 # Sanitize longitude range for APEX
                 if long > 180.0:
                     long -= 360.0
@@ -613,16 +617,16 @@ def convert_to_mag(
                 [lat_mag, long_mag] = apex.geo2apex(
                     lat,
                     long,
-                    alt4mag,
+                    _alt4mag,
                 )
                 # [lat_mag, long_mag, alt_mag] = apex.gg_gm_apex(
                 #     int(year4mag),
                 #     lat,
                 #     long,
-                #     alt4mag,
+                #     _alt4mag,
                 #     apex.GEO_TO_MAG,
                 # )
-                yield (long_mag, lat_mag, alt4mag)
+                yield (long_mag, lat_mag, _alt4mag)
             # END FOR long, lat, alt_mag
 
     else:
@@ -675,7 +679,7 @@ def convert_to_mag(
             [convert_to_mag(part, year4mag, alt4mag) for part in geom.geoms]
         )
     else:
-        raise ValueError("Type %r not recognized" % geom.geom_type)
+        raise ValueError(f"Type {geom.geom_type!r} not recognized")
 
 
 def reverse_lon(
@@ -877,7 +881,7 @@ def add_product_metadata(
     # with it.
     try:
         created = nc_data["Metadata/CreationTimeString"][:]  # True creation date
-    except Exception as _exc:
+    except Exception as _exc:  # noqa: BLE001
         created = datetime.datetime.fromtimestamp(
             os.path.getmtime(source), tz=datetime.UTC
         ).isoformat()  # Get date from OS. Match JPL microseconds+TZ ISO format
@@ -887,7 +891,7 @@ def add_product_metadata(
     try:
         _has_tz = created.index("+")
         truncate -= 9  # cut more for microseconds + TZ specification
-    except Exception as _exc:
+    except Exception as _exc:  # noqa: BLE001, S110
         pass
     created = created[0:truncate]
 
@@ -1217,9 +1221,9 @@ def save_close_figure(
                 metadata = img.text
                 logger.debug(f"{type(metadata)}")
                 logger.debug(f"{metadata!s}")
-                if "EZIE Source Hash" in metadata.keys():
+                if "EZIE Source Hash" in metadata:
                     old_hash = metadata["EZIE Source Hash"]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(f"{exc}: Unable to read image metadata, will regenerate")
 
     if name_only:
@@ -1245,7 +1249,7 @@ def save_close_figure(
             metadata=metadata,
         )  # ty:ignore[possibly-missing-attribute]
         logger.info(f"Saved figure: {fig_path.name}")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.info(f"Failed to save figure: {fig_path.name}")
