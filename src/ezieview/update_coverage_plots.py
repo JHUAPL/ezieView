@@ -1001,7 +1001,7 @@ def main(
             continue
 
     run_dates = sorted(set(dates))
-    run_dates = run_dates[::-1]  # Newest first -- optional
+    # run_dates = run_dates[::-1]  # Newest first -- optional
 
     for run_date in run_dates:
         logger.info(f"Generating coverage plots and maps for {run_date!s}")

@@ -929,7 +929,7 @@ def plot_calibration(
                     case "S3" | "S4":
                         vmin, vmax = -50, +50
 
-            for row in range(0, num_rows):
+            for row in range(num_rows):
                 ax = axs[row, col]
                 var_name = f"{tkind_vars[kk]}{row + 1}"
                 var_title = f"{t_kind.upper()}{row + 1}"
@@ -2759,16 +2759,16 @@ def sza_overlay(
     longrd, latgrd = np.meshgrid(lonvec, latvec)
     pgrd = np.array(
         [
-            np.cos(MLT_sign * longrd) * np.cos((latgrd)),
-            np.sin(MLT_sign * longrd) * np.cos((latgrd)),
-            np.sin((latgrd)),
+            np.cos(MLT_sign * longrd) * np.cos(latgrd),
+            np.sin(MLT_sign * longrd) * np.cos(latgrd),
+            np.sin(latgrd),
         ]
     ).T
     psun = np.array(
         [
-            np.cos(MLT_sign * sun_lon_rad) * np.cos((sun_lat_rad)),
-            np.sin(MLT_sign * sun_lon_rad) * np.cos((sun_lat_rad)),
-            np.sin((sun_lat_rad)),
+            np.cos(MLT_sign * sun_lon_rad) * np.cos(sun_lat_rad),
+            np.sin(MLT_sign * sun_lon_rad) * np.cos(sun_lat_rad),
+            np.sin(sun_lat_rad),
         ]
     )
     szagrd = np.degrees(np.acos(np.dot(pgrd, psun))).T
@@ -2877,7 +2877,9 @@ def plot_b_1D_maps_with_time(
     ftgt, old_hash, new_hash = save_close_figure(
         source=source,
         save_directory=save_directory,
-        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT),
+        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
+            tzinfo=datetime.UTC
+        ),
         spacecraft=prsd.spcv,
         tstmp=prsd.time,
         plot_type=plot_type,
@@ -2887,6 +2889,7 @@ def plot_b_1D_maps_with_time(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
+    logger.info(f"Checked hash for source file: {source.as_posix()}")
 
     if ftgt.exists() and (old_hash == new_hash) and not overwrite:
         logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
@@ -3360,7 +3363,7 @@ def ingest_full_day_all_sv(
             continue
 
         # Gather entries for ALL orbits by this SV on this date
-        if prsd.spcv not in date_dict.keys():
+        if prsd.spcv not in date_dict:
             date_dict[prsd.spcv] = {}
         if "l1" in each_file.stem.lower():
             try:
@@ -3393,7 +3396,7 @@ def ingest_full_day_all_sv(
         for orb_id, orb_dict in sv_dict.items():
             for dbvar in coverage_db_list:
                 full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-                if full_key not in full_day.keys():
+                if full_key not in full_day:
                     full_day[full_key] = []
                 try:
                     if orb_dict[dbvar] is not None:

@@ -176,7 +176,8 @@ def main(
         prsd = parse_ezie_product_name(each_file)
         new_list.append((ndx, prsd.spcv, prsd.dttm))
     srt_list = sorted(new_list, key=lambda f: (f[2], f[1]))
-    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::-1]]
+    # keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::-1]] # newest first
+    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::+1]]  # oldest first
 
     # Create output directory for storage of plot files if it does not already exist
     out_dir_path = Path(plots_directory)
@@ -210,7 +211,7 @@ def main(
             with Dataset(each_file, mode="r") as nc_data:
                 try:
                     nobs = nc_data.dimensions["ObsRate"].size
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.error(
                         f"Exception: {exc} obtaining ObsRate in file "
                         f"{Path(each_file).as_posix()}"
@@ -307,6 +308,15 @@ def main(
             # on the algorithm in split_on_science_segments(). No further distinction
             # needs to be made.
 
+            try:
+                with Dataset(each_file, mode="r") as nc_data:
+                    nobs = nc_data.dimensions["ObsRate"].size
+            except OSError:
+                logger.exception(
+                    f"Unable to open file {Path(each_file).as_posix()}", stack_info=True
+                )
+                continue
+
             with Dataset(each_file, mode="r") as nc_data:
                 nobs = nc_data.dimensions["ObsRate"].size
                 if nobs < 10:
@@ -370,7 +380,7 @@ def main(
                 with Dataset(source_l2, mode="r") as l2_data:
                     git_branch = f"{l2_data['Configuration/git_branch'][:]}"
                     git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("Unable to get commit & hash from source L2 file:")
                 logger.warning(f"==> {source_l2}")
                 logger.warning(f"Exception was: {exc}")
@@ -380,7 +390,7 @@ def main(
             with Dataset(each_file, mode="r") as nc_data:
                 try:
                     nobs = nc_data["l2_data/time_utc"].size
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.error(
                         f"Exception: {exc} field (time_utc) missing in "
                         f"file {each_file.as_posix()}"

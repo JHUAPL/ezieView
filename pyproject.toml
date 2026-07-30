@@ -43,6 +43,12 @@ view_orbits = "ezieview.update_orbit_plots:main"
 [tool.setuptools.package-data]
 "ezieview.binary-assets" = ["*.png"]
 
+[tool.ruff]
+lint.ignore=[
+"N999",
+"BLE001",
+]
+
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3 :: Only",

@@ -31,6 +31,64 @@ logger = logging.getLogger(__name__)
 # endregion
 
 
+def split_on_calibration_segments(
+    nc_data: netCDF4.Dataset,
+):
+    """
+    Build table of observations where the MEM acquisition mode flag is set to
+    CALIBRATION (1) or ENGINEERING (3). Use the corresponding time segments as a proxy
+    for orbit number, pending possible inclusion of ACTUAL orbit numbers in the EZIE
+    products at some later date.
+
+    Based on Rob Barnes' algorithm in SplitL1.py, but more pythonified.
+
+    MEM acquisition mode flags (as defined in the L1 files from Sid/JPL):
+    - 0 - Other
+    - 1 - Calibration
+    - 2 - Science
+    - 3 - Engineering
+
+    Args:
+        nc_data (netCDF4.Dataset): EZIE L1 file
+
+    Returns:
+        2-D array of (integer) start and stop indices for multiple discrete science
+        observations in an EZIE L1 file. There are currently ~15 orbits per day, with
+        one (or perhaps more? TBD) science observations per orbit.
+    """
+    CALIBRATION: int = 1
+    ENGINEERING: int = 3
+    MAX_GAP: float = 60.0  # seconds
+    obs_max: int = nc_data["Time/time_utc"].size
+
+    # FIXME: Switch to using MEM footprint != NaN instead of mode == SCIENCE? TBD
+
+    # Check acquisition_mode status for each time step.
+    obs_flg = (nc_data["ChannelOrderedCounts/acquisition_mode"][:] == CALIBRATION) | (
+        nc_data["ChannelOrderedCounts/acquisition_mode"][:] == ENGINEERING
+    )
+
+    # Set obsflg to False where time gap is > MAX_GAP between consecutive steps.
+    t_jmp = np.diff(nc_data["Time/time_tai"][:]) > MAX_GAP
+    obs_flg[np.argwhere(t_jmp).flatten()] = False
+
+    # Get indices of time steps where obs_flg changes from its previous value.
+    status_change = np.diff(obs_flg) > 0
+    seg_lst = [int(1 + x) for x in np.argwhere(status_change).flatten()]
+
+    # Check for segments in progress at start or end of file, enclose them as needed
+    if obs_flg[0]:  # We're starting off already in a desired mode, "open" the segment
+        seg_lst = [0] + seg_lst
+    if obs_flg[-1]:  # We're ending while still in a desired mode, "close" the segment
+        seg_lst = seg_lst + [obs_max - 1]
+
+    # Place paired segment starts and stops in list of 2-tuples (1-D list of tuples)
+    pair_iterator = iter(seg_lst)
+    seg_lst = list(zip(pair_iterator, pair_iterator))
+
+    return seg_lst
+
+
 def split_on_science_segments(
     nc_data: netCDF4.Dataset,
 ):
@@ -92,7 +150,7 @@ def split_on_science_segments(
         seg_lst = seg_lst + [obs_max - 1]
 
     # Place paired segment starts and stops in their own columns (2-D array)
-    # seg_lst = np.array(seg_lst).reshape(len(seg_lst) // 2, 2)
+    # seg_lst = np.array(seg_lst).reshape(len(seg_lst) // 2, 2)  # OR alternatively ...
     # Place paired segment starts and stops in list of 2-tuples (1-D list of tuples)
     pair_iterator = iter(seg_lst)
     seg_lst = list(zip(pair_iterator, pair_iterator))
@@ -289,7 +347,6 @@ def filter_daily_files_by_version(
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
     if len(ezie_files) == 0:
-        log_mthd(f"{file_pattern}")
         logger.warning(f"Returning, no files found matching {file_pattern}")
         return
 
@@ -316,7 +373,7 @@ def filter_daily_files_by_version(
                 f"{prsd.date}_sv{prsd.spcv}",
                 f"v{prsd.vrsn}_r{prsd.rvsn}",
             )
-            log_mthd(f"{file_key} {revision}")
+            logger.debug(f"{file_key} {revision}")
             if file_key not in revisions:
                 revisions[file_key] = (revision, each_file)
             else:
@@ -330,7 +387,7 @@ def filter_daily_files_by_version(
 
     newest_versions = sorted([each_file[1] for each_file in revisions.values()])
     if len(newest_versions) > 0:
-        log_mthd(f"Newest versions are {newest_versions}")
+        log_mthd(f"Newest version[s]: {[str(vrsn) for vrsn in newest_versions]}")
         return newest_versions
     else:
         return  # return None, do NOT return an empty list
@@ -509,8 +566,9 @@ def get_datetime_from_utc_string(
                 f"{nc_time_group.variables['time_utc'][tslc]}"
             )
             return None
-    n_times: int = len(datetimes_utc)
-    return np.array(datetimes_utc), datetimes_utc[n_times // 2]
+    # n_times: int = len(datetimes_utc)
+    # return np.array(datetimes_utc), datetimes_utc[n_times // 2]
+    return np.array(datetimes_utc), datetimes_utc[0]
 
 
 def moving_average(x, w):
@@ -520,7 +578,7 @@ def moving_average(x, w):
 def convert_to_mag(
     geom,
     year4mag: int,
-    alt4mag: float | int = REFERENCE_ALTITUDE_KM,
+    alt4mag: float = REFERENCE_ALTITUDE_KM,
 ):
     """
     Converts cartopy/shapely features, e.g., continents, from geographic to geomagnetic
@@ -661,7 +719,7 @@ def reverse_lon(
         raise ValueError(f"Type {geom.geom_type!r} not recognized")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _inverted_continents():
     """
     Generate a list of the geometries with longitude coordinate values inverted, i.e.,
@@ -701,7 +759,7 @@ def map_inverted_continents(
         )
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _magnetic_continents(year4mag: int, alt4mag=REFERENCE_ALTITUDE_KM):
     """
     Performs magnetic lat/lon coordinate transformation of continent geometries.
@@ -733,7 +791,7 @@ def map_magnetic_continents(
     ax: plt.Axes,
     time4mag: datetime.datetime,
     sun_mlon: float,
-    alt4mag: float | int,
+    alt4mag: float,
     south_inverted: bool = False,
     linewidth: float = 1.0,  # Use thicker lines for L2 plots that don't overlay quivers
     zorder: int = 3,
