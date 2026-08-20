@@ -1420,7 +1420,7 @@ def plot_retrieved_bd_only(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {source.as_posix()}")
@@ -1591,7 +1591,7 @@ def plot_retrieved_bd_only(
                 list(b_rng[1:2])
                 + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {source.as_posix()}")
@@ -1637,7 +1637,7 @@ def plot_retrieved_bd_only(
             mem_axs.set_ylim(
                 b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {source.as_posix()}")
@@ -2255,7 +2255,7 @@ def plot_mag_and_geo_maps(
 
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {source.as_posix()}")
@@ -2904,7 +2904,7 @@ def plot_b_1D_maps_with_time(
                 for _ in nc_data["/l2_data/time_utc"][:]
             ]
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(f"Encountered exception while processing L3 file: {exc}")
         return
 
@@ -3389,7 +3389,7 @@ def ingest_full_day_all_sv(
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
                         date_dict[prsd.spcv][prsd.orbt][dbvar] = None
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error(f"Unrecoverable problem, skipping file: {exc}")
                 date_dict[prsd.spcv][prsd.orbt][dbvar] = None
 
@@ -3403,7 +3403,7 @@ def ingest_full_day_all_sv(
                 try:
                     if orb_dict[dbvar] is not None:
                         full_day[full_key].extend(orb_dict[dbvar])
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.error(
                         f"Selected field could not be extracted from file: {exc}"
                     )
@@ -3469,7 +3469,7 @@ def plot_retrieved_B_and_J(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc2_data.groups["Time"])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {nc2_sorc.as_posix()}")
@@ -3632,7 +3632,7 @@ def plot_retrieved_B_and_J(
                 list(b_rng[1:2])
                 + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {nc2_sorc.as_posix()}")
@@ -3678,7 +3678,7 @@ def plot_retrieved_B_and_J(
             mem_axs.set_ylim(
                 b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {nc2_sorc.as_posix()}")
@@ -3885,7 +3885,7 @@ def plot_retrieved_B_and_J(
                     for _ in nc3_data["/l2_data/time_utc"][:]
                 ]
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(f"Encountered exception while processing L3 file: {exc}")
             return
 

@@ -233,7 +233,7 @@ def jpl_safe_datetime(
         date_sanitized = datetime.datetime.strptime(
             f"{datestr}_{timestr}", "%Y%m%d_%H%M%S"
         ).replace(tzinfo=datetime.UTC)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Should fix cases where seconds was set to 60. Error handling should be made
         # more general, but this'll get us past the current roadblock.
         _datestr = datestr
@@ -881,7 +881,7 @@ def add_product_metadata(
     # with it.
     try:
         created = nc_data["Metadata/CreationTimeString"][:]  # True creation date
-    except Exception as _exc:  # noqa: BLE001
+    except Exception as _exc:
         created = datetime.datetime.fromtimestamp(
             os.path.getmtime(source), tz=datetime.UTC
         ).isoformat()  # Get date from OS. Match JPL microseconds+TZ ISO format
@@ -891,8 +891,8 @@ def add_product_metadata(
     try:
         _has_tz = created.index("+")
         truncate -= 9  # cut more for microseconds + TZ specification
-    except Exception as _exc:  # noqa: BLE001, S110
-        pass
+    except Exception as _exc:
+        logger.warning(f"Problem handling timestamp formatting: {created!s}")
     created = created[0:truncate]
 
     # src_str = (
@@ -1223,7 +1223,7 @@ def save_close_figure(
                 logger.debug(f"{metadata!s}")
                 if "EZIE Source Hash" in metadata:
                     old_hash = metadata["EZIE Source Hash"]
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(f"{exc}: Unable to read image metadata, will regenerate")
 
     if name_only:
@@ -1249,7 +1249,7 @@ def save_close_figure(
             metadata=metadata,
         )  # ty:ignore[possibly-missing-attribute]
         logger.info(f"Saved figure: {fig_path.name}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.info(f"Failed to save figure: {fig_path.name}")

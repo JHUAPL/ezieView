@@ -542,7 +542,7 @@ def plot_daily_maps(
                     map_axs.add_feature(
                         cfeature.LAND,
                         alpha=0.7 if dark_mode else 0.3,
-                        facecolor="#d0c0a0" if dark_mode else "#d0c0a0",
+                        facecolor="#d0c0a0" if dark_mode else "#d0c0a1",
                     )
                     _mag_lat_artist = plot_geomagnetic_references(
                         map_axs,
@@ -571,7 +571,7 @@ def plot_daily_maps(
                         if regn == EQUATORIAL
                         else True,
                         x_inline=False,
-                        y_inline=True if regn != EQUATORIAL else False,
+                        y_inline=regn != EQUATORIAL,
                         xlocs=range(-180, 180, 30),
                         ylocs=lats_n
                         if regn == NORTH
@@ -828,9 +828,7 @@ def plot_daily_maps(
                             bbox_to_anchor=(0.90, 0.90),
                             loc="lower left",
                             markerscale=mrkr_scal,
-                            fontsize="x-small"
-                            if ptype == data_collect_geo
-                            else "x-small",
+                            fontsize="x-small",
                         )
 
                 logger.info(
@@ -1009,7 +1007,7 @@ def main(
 
     for run_date in run_dates:
         logger.info(f"Generating coverage plots and maps for {run_date!s}")
-        fdd, uniq_svid, uniq_orbs = ingest_full_day_all_sv(
+        fdd, _uniq_svid, uniq_orbs = ingest_full_day_all_sv(
             run_date=run_date,
             used_files=keep_files,
         )  # Full Day Dictionary
@@ -1095,7 +1093,9 @@ def main(
 
         # Plot coverage for this date using combined daily entries for all SVs & orbits
         plot_mlt_sza_coverage(
-            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d"),
+            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d").replace(
+                tzinfo=UTC_TZ
+            ),
             sc_id=np.array(fdd["SpaceVehicle"]),
             orbit=np.array(fdd["orbit_number"]),
             mem_mlat=mem_mlat,
@@ -1109,7 +1109,9 @@ def main(
         )
 
         plot_daily_maps(
-            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d"),
+            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d").replace(
+                tzinfo=UTC_TZ
+            ),
             sc_id=np.array(fdd["SpaceVehicle"]),
             orbit=np.array(fdd["orbit_number"]),
             sclat=np.array(fdd["sat_lat"]),

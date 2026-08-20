@@ -211,7 +211,7 @@ def main(
             with Dataset(each_file, mode="r") as nc_data:
                 try:
                     nobs = nc_data.dimensions["ObsRate"].size
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.error(
                         f"Exception: {exc} obtaining ObsRate in file "
                         f"{Path(each_file).as_posix()}"
@@ -380,7 +380,7 @@ def main(
                 with Dataset(source_l2, mode="r") as l2_data:
                     git_branch = f"{l2_data['Configuration/git_branch'][:]}"
                     git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("Unable to get commit & hash from source L2 file:")
                 logger.warning(f"==> {source_l2}")
                 logger.warning(f"Exception was: {exc}")
@@ -390,7 +390,7 @@ def main(
             with Dataset(each_file, mode="r") as nc_data:
                 try:
                     nobs = nc_data["l2_data/time_utc"].size
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.error(
                         f"Exception: {exc} field (time_utc) missing in "
                         f"file {each_file.as_posix()}"

@@ -597,9 +597,7 @@ def plot_daily_maps(
                             bbox_to_anchor=(1.10, +0.05),
                             loc="upper right",
                             markerscale=mrkr_scal,
-                            fontsize="x-small"
-                            if ptype == data_collect_geo
-                            else "x-small",
+                            fontsize="x-small",
                         )
 
                     logger.info(
@@ -811,7 +809,7 @@ def plot_daily_maps(
                         bbox_to_anchor=(1.00, +0.00),
                         loc="lower right",
                         markerscale=mrkr_scal,
-                        fontsize="x-small" if ptype == data_collect_geo else "x-small",
+                        fontsize="x-small",
                     )
 
                 logger.info(
@@ -1005,7 +1003,7 @@ def main(
 
     for run_date in run_dates:
         logger.info(f"Generating coverage plots and maps for {run_date!s}")
-        fdd, uniq_svid, uniq_orbs = ingest_full_day_all_sv(
+        fdd, _uniq_svid, uniq_orbs = ingest_full_day_all_sv(
             run_date=run_date,
             used_files=keep_files,
         )  # Full Day Dictionary
@@ -1091,7 +1089,9 @@ def main(
 
         # Plot coverage for this date using combined daily entries for all SVs & orbits
         plot_mlt_sza_coverage(
-            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d"),
+            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d").replace(
+                tzinfo=UTC_TZ
+            ),
             sc_id=np.array(fdd["SpaceVehicle"]),
             orbit=np.array(fdd["orbit_number"]),
             mem_mlat=mem_mlat,
@@ -1106,7 +1106,9 @@ def main(
         )
 
         plot_daily_maps(
-            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d"),
+            obs_date=datetime.datetime.strptime(run_date, "%Y%m%d").replace(
+                tzinfo=UTC_TZ
+            ),
             sc_id=np.array(fdd["SpaceVehicle"]),
             orbit=np.array(fdd["orbit_number"]),
             sclat=np.array(fdd["sat_lat"]),

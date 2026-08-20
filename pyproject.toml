@@ -16,9 +16,6 @@ dependencies = [
   "cartopy",
   "click",
   "matplotlib",
-  "mkdocs",
-  "mkdocs-material",
-  "mkdocstrings-python",
   "netCDF4",
   "numpy",
   "requests",
@@ -26,13 +23,13 @@ dependencies = [
   "spiceypy",
 ]
 
-[[tool.uv.index]]
-name = "python-local"
-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
-publish-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
-explicit = true
+# TODO: Should we specify these in pip-installable package, or just build environment?
+#  "pdoc3",
+# "mkdocs",
+# "mkdocs-material",
+# "mkdocstrings-python",
 
-# Just put example script in README? TBD
+# TODO: Just put example script in README? TBD
 # [tool.setuptools]
 # script-files = [ "make_ezie_images.sh" ]
 
@@ -49,6 +46,12 @@ lint.ignore=[
 "BLE001",
 ]
 
+[[tool.uv.index]]
+name = "python-local"
+url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
+publish-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
+explicit = true
+
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3 :: Only",
@@ -63,9 +66,6 @@ classifiers = [
 ]
 license = ["BSD 3-Clause"]
 license-files = ["LICENSE.md"]
-authors = [
-  { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
-]
 
 [project.urls]
 Source = "https://bitbucket.org/aplkaiju/ezieview/"

@@ -49,6 +49,8 @@ Thumbs.db
 *.wmv
 
 # Locally generated log and plot outputs directories
+docs-mkdocs/
+docs-pdoc/
 logs/
 outputs/
 
