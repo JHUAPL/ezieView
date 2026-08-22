@@ -16,6 +16,7 @@ def initialize_logging(
     log_folder: str = "./logs",
     log_level: int = logging.INFO,
     rotating: bool = False,
+    timestamp: bool = True,
     open_console: bool = False,
     jupyter: bool = False,
     multiproc: bool = False,
@@ -110,12 +111,15 @@ def initialize_logging(
                 utc=True,
                 backupCount=0,
             )
-        else:
+        elif timestamp:
             log_file = (
                 lf_path
                 / f"{datetime.datetime.now(tz=datetime.UTC).strftime('%Y%m%d_%H%M%S')}-"
                 f"{basename}.log"
             )
+            handler = logging.FileHandler(filename=log_file, mode="w")
+        else:
+            log_file = lf_path / f"{basename}.log"
             handler = logging.FileHandler(filename=log_file, mode="w")
     else:
         handler = logging.StreamHandler(sys.stdout)
