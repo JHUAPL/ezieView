@@ -184,7 +184,6 @@ def extract_science_passes(nc_data: netCDF4.Dataset):
         *[int(x) for x in np.argwhere(timejump).flatten()],
         len(timevals),
     ]
-    logger.debug(f"{timerang!s}")
     # Break up observations into pairs of indices that start and finish at gap edges.
     index_pairs = []
     for tt, t0 in enumerate(timerang[:-1]):
@@ -407,8 +406,8 @@ def filter_files_by_version(
     """
     Create list of highest version/revision for a given spacecraft and date.
     """
-    log_mthd = logger.debug
-    # log_mthd = logger.info
+    # log_mthd = logger.debug
+    log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
@@ -517,23 +516,6 @@ def filter_files_by_version(
             return pruned_versions
         else:
             return  # do NOT return an empty list
-
-
-# def watermark(ax):
-#     """
-#     Overlay EZIE logo (img) in bottom right corner of plot axes (ax)
-#     """
-#     from matplotlib.offsetbox import AnchoredOffsetbox, OffsetImage
-#     from scipy.ndimage import zoom
-#     ezie_logo_img = plt.imread(
-#         Path(__file__).parent.parent / "binary-assets" / "ezie_logo_no_bg.png"
-#     )
-#     scaled_logo = zoom(ezie_logo_img, (1.0, 1.0, 1))
-#     imagebox = OffsetImage(scaled_logo, zoom=0.25, alpha=1.0)
-#     imagebox.image.axes = ax
-#     ao = AnchoredOffsetbox(4, pad=0.05, borderpad=0, child=imagebox)
-#     ao.patch.set_alpha(0)
-#     ax.add_artist(ao)
 
 
 def get_datetime_from_utc_string(
@@ -838,6 +820,23 @@ def map_magnetic_continents(
         )
     end = time.perf_counter()
     logger.info(f"Elapsed time: {end - bgn:.2f} seconds")
+
+
+# def watermark(ax):
+#     """
+#     Overlay EZIE logo (img) in bottom right corner of plot axes (ax)
+#     """
+#     from matplotlib.offsetbox import AnchoredOffsetbox, OffsetImage
+#     from scipy.ndimage import zoom
+#     ezie_logo_img = plt.imread(
+#         Path(__file__).parent.parent / "binary-assets" / "ezie_logo_no_bg.png"
+#     )
+#     scaled_logo = zoom(ezie_logo_img, (1.0, 1.0, 1))
+#     imagebox = OffsetImage(scaled_logo, zoom=0.25, alpha=1.0)
+#     imagebox.image.axes = ax
+#     ao = AnchoredOffsetbox(4, pad=0.05, borderpad=0, child=imagebox)
+#     ao.patch.set_alpha(0)
+#     ax.add_artist(ao)
 
 
 def overlay_ezie_logo(

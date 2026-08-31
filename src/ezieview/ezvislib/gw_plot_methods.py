@@ -807,12 +807,6 @@ def plot_calibration(
     if i1 == obs_flg.size:
         i1 -= 1  # Adjust end of range when this occurs
 
-    # logger.debug(f"{obs_flg[0:10]}")
-    # logger.debug(f"{obs_flg[i0]}")
-    # logger.debug(f"{obs_flg[i1 - 1]}")
-    # logger.debug(f"{obs_flg[-10:]}")
-    # logger.debug(f"{obs_flg.size} - {i0} : {i1}")
-
     time_utc = time_utc[i0:i1]
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
     product = nc_data.getncattr("product")
@@ -910,7 +904,7 @@ def plot_calibration(
 
             for row in range(num_rows):
                 ax = axs[row, col]
-                var_name = f"{tkind_vars[kk]}{row + 1}"
+                var_name = f"{tkind_vars[kk]}{row + 1}"  # {TA or TB}{MEM number}
                 var_title = f"{t_kind.upper()}{row + 1}"
                 data = nc_data[var_name][i0:i1, :, col]  # Shape: (ObsRate, Freq_Array)
                 if t_diff:
