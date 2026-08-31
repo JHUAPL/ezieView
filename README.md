@@ -36,7 +36,6 @@ python3 -m ezieview.update_orbit_plots --help
 points for `ezieview.update_coverage_plots` and `ezievew.update_orbit_plots`,
 respectively.
 
-
 ## Shell script interface
 
 - The `make_plots.sh` shell script will generate all images for a given date range, as
