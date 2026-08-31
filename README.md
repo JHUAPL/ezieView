@@ -14,17 +14,14 @@
 . .venv/bin/activate
 
 python3 -m ezieview.update_coverage_plots [CLI options]
-```
-
-... or 
-`view_coverage [CLI options][^1]`
-
-```bash
 python3 -m ezieview.update_orbit_plots [CLI options]
 ```
 
-... or 
-`view_orbits [CLI options][^1]`
+... or use the alternate script entry points provided in the package installation:
+
+`view_coverage [CLI options]`  
+
+`view_orbits [CLI options]`[^1]
 
 Run the scripts with the `--help` flag to display interactive help for each utility,
 e.g.,

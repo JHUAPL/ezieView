@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "ezieView"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
 ]
@@ -21,6 +21,7 @@ dependencies = [
   "requests",
   "scipy",
   "spiceypy",
+  "setuptools",
 ]
 
 # TODO: Should we specify these in pip-installable package, or just build environment?
@@ -47,10 +48,10 @@ lint.ignore=[
 ]
 
 [[tool.uv.index]]
-name = "python-local"
-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
-publish-url = "https://artifactory.jhuapl.edu/artifactory/api/pypi/python-local/simple"
-explicit = true
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+default = true
 
 classifiers = [
   "Development Status :: 4 - Beta",

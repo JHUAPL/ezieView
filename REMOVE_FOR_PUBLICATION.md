@@ -16,14 +16,17 @@
 
 ## Build/install instructions (Temporary notes to self, also to be removed for release)
 
-- Configure artifactory/pypi credentials
-```o[distutils]
-index-servers = python-remote
+- Configure testpypi credentials
 
-[python-remote]
-repository: https://artifactory.jhuapl.edu/artifactory/api/pypi/python-remote
-username: YOUR_USERNAME
-password: YOUR_API_KEY_OR_PASSWORD
+```bash
+[distutils]
+index-servers =
+    testpypi
+
+[testpypi]
+repository = https://test.pypi.org/legacy/
+username = __token__
+password = pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC
 ```
 
 - In ezieview directory:
@@ -34,22 +37,35 @@ uv pip install --upgrade build
 uv pip install --upgrade twine
 . .venv/bin/activate
 UV_CACHE_DIR=/project/ezie/.cache/uv PIP_INDEX_URL=https://pypi.org/simple python3 -m build
+```
 
-# Upload to artifactory with twine
-twine upload --repository apl ezieview/dist/*
+or
 
-# Test for successful upload
+```bash
+uv build --index https://pypi.org/simple
+```
+
+## Upload to testpypi with twine or uv
+
+```bash
+uv publish dist/ezieview-0.1.1-py3-none-any.whl --publish-url https://test.pypi.org/legacy/ -u __token__ -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC --verbose
+
+twine upload dist/ezieview-0.1.1-py3-none-any.whl --repository-url https://test.pypi.org/legacy -u __token__ -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC --verbose
+```
+
+## Test for successful upload
+
+```bash
 mkdir ezvtest
 cd ezvtest
-# python -m venv /tmp/test_venv
-# source /tmp/test_venv/bin/activate
 uv venv -p 3.12
 . .venv/bin/activate
-
-python -m pip install --index-url \
-    "https://artifactory.jhuapl.edu/artifactory/api/pypi/pypi-apl-virtual/simple" \
-    --no-deps ezieview==0.1.0
-
+uv pip install \
+    --default-index "https://test.pypi.org/simple" \
+    --index "https://pypi.org/simple" \
+    ezieview==0.1.1
+view_coverage --help
+view_orbits --help
 ```
 
 - Note that specifying a non-standard location for UV_CACHE_DIR is only useful on DMZ
