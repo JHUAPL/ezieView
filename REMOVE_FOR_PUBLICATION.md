@@ -47,11 +47,26 @@ uv build --index https://pypi.org/simple
 
 ## Upload to testpypi with twine or uv
 
-```bash
-uv publish dist/ezieview-0.1.1-py3-none-any.whl --publish-url https://test.pypi.org/legacy/ -u __token__ -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC --verbose
+Publish/upload the package using `uv publish`:
 
-twine upload dist/ezieview-0.1.1-py3-none-any.whl --repository-url https://test.pypi.org/legacy -u __token__ -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC --verbose
+```bash
+uv publish dist/ezieview-0.1.2-py3-none-any.whl \
+    --system-certs \
+    --verbose \
+    --publish-url https://test.pypi.org/legacy \
+    -u __token__ \
+    -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC
 ```
+
+or alternatively using `twine upload`:
+
+```bash
+twine upload dist/ezieview-0.1.2-py3-none-any.whl \
+    --verbose \
+    --repository-url https://test.pypi.org/legacy \
+    -u __token__ \
+    -p pypi-AgENdGVzdC5weXBpLm9yZwIkZWQ4M2I5OWUtYWRjMC00NzU3LThjZjItODJiYjA1NTBhNDA1AAIqWzMsIjJhNDY0YTYwLWNiNDMtNGE0NS1hOTRhLWYxZDRmOGJiNDhlNCJdAAAGIOlJ-CNtUdgwz2mIYAI0bFbCpby9eW1gek6rTVspdAqC 
+    ```
 
 ## Test for successful upload
 
@@ -61,9 +76,10 @@ cd ezvtest
 uv venv -p 3.12
 . .venv/bin/activate
 uv pip install \
+    --system-certs \
     --default-index "https://test.pypi.org/simple" \
     --index "https://pypi.org/simple" \
-    ezieview==0.1.1
+    ezieview==0.1.2
 view_coverage --help
 view_orbits --help
 ```
@@ -72,6 +88,9 @@ view_orbits --help
   systems where user HOME directory space is limited and the uv cache directory may also
   be mounted on a different disk volume than the one where the code and venv are
   installed.
+
+- The `--system-certs` flag may be helpful when working on APLNIS and accessing the
+  outside world through the APL proxy.
 
 - Note also that the use of setup.py/setuptools is now deprecated.
 
@@ -86,16 +105,20 @@ uv venv -p 3.12
 ```
 
 - Option A, for developers: Install in "editable" mode, allowing you to modify the
-  package code and see the changes immediately:
+  package code and see the changes immediately. First `git clone` the repo from
+  `aplkaiju`, then `cd` nto the repo directory and run the following command:
 
 ```bash
-UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install -e ../ezieView
+[UV_CACHE_DIR=/project/ezie/.cache/uv] uv pip install \
+    [--system-certs]  \
+    --index "https://pypi.org/simple" -e  .
 ```
 
+
 - Option B, for regular users: Install in the normal fashion. Eventually the package
-  will be available from the Artifactory (JHUAPL) or PyPi (rest of world) and will be
+  will be available from regular PyPi and will be
   installed by name rather than a local file path/wheel.
 
 ```bash
-UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install ../ezieView/dist/ezieview-0.0.1-py3-none-any.whl
+UV_CACHE_DIR=/project/ezie/.cache/uv uv pip install ../ezieView/dist/ezieview-0.0.2-py3-none-any.whl
 ```

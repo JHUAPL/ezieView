@@ -863,7 +863,6 @@ def plot_daily_maps(
     "-d0",
     "--start_date",
     type=click.DateTime(formats=[CLI_DATE_FORMAT]),
-    default=None,
     required=True,
     help="Start date of entries to be processed (YYYY-MM-DD)",
 )
@@ -871,14 +870,12 @@ def plot_daily_maps(
     "-d1",
     "--stop_date",
     type=click.DateTime(formats=[CLI_DATE_FORMAT]),
-    default=None,
     required=True,
     help="Stop date (inclusive) of entries to be processed (YYYY-MM-DD)",
 )
 @click.option(
     "-fd",
     "--file_directory",
-    default=None,
     required=True,
     help="Root directory path to be searched for EZIE input files",
 )
@@ -894,7 +891,6 @@ Note that you MUST escape all wildcard characters!
 @click.option(
     "-pd",
     "--plots_directory",
-    default=None,
     required=True,
     help="""
 Root directory in which to save generated plot files, to which 'single-orbit' will

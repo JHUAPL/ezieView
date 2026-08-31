@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "ezieView"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
   { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
 ]
@@ -21,7 +21,6 @@ dependencies = [
   "requests",
   "scipy",
   "spiceypy",
-  "setuptools",
 ]
 
 # TODO: Should we specify these in pip-installable package, or just build environment?
