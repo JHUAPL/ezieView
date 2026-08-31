@@ -53,6 +53,7 @@ echo "==================================================================="
 # 2) Ancillary, geolocation, TA, TB
 # 3) B field retrieval, dBd[own] only ATM
 # 4) Current retrieval, based on dBd only ATM
+# 5) B field and Current retrievals on same figure
 # =====================================================================================
 
 python3 -m ezieview.update_coverage_plots \
@@ -82,3 +83,10 @@ python3 -m ezieview.update_orbit_plots \
     -fd "${EZ_L3_DATA}" \
     -pd "${EZ_L3_PLOT}" \
     -over "${EZ_OVERWRITE}"
+
+python3 -m ezieview.update_orbit_plots \
+    -d0 "${EZ_BGN_DATE}" \
+    -d1 "${EZ_END_DATE}" \
+    -fd "${EZ_L2_DATA}" \
+    -pd "${EZ_L2_PLOT}" \
+    -over "${EZ_OVERWRITE}" -merged

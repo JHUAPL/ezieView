@@ -231,8 +231,8 @@ def coverage_plot_polar_layout(
             )
 
         if show_terminator_at is not None:
-            # FIXME: Take difference from noon or midnight and flip sign to make this
-            # work when plotting with south_inverted set
+            # QUERY: Could we take difference from noon or midnight & flip sign to make
+            # this work when plotting with south_inverted set, i.e., "trick" cartopy?
             map_axs.add_feature(
                 Nightshade(
                     show_terminator_at,
@@ -332,8 +332,6 @@ def coverage_plot_stereographic_layout(
         gl.ylabel_style = {"size": "small"}
 
         if show_terminator_at is not None:
-            # FIXME: Take difference from noon or midnight and flip sign to make this
-            # work when plotting with south_inverted set
             map_axs.add_feature(
                 Nightshade(
                     show_terminator_at,
@@ -453,8 +451,6 @@ def mollweide_layout(
         gl.ylabel_style = {"size": "small"}
 
         if show_terminator_at is not None:
-            # FIXME: Take difference from noon or midnight and flip sign to make this
-            # work when plotting with south_inverted set
             map_axs.add_feature(
                 Nightshade(
                     show_terminator_at,
@@ -535,13 +531,9 @@ def plot_geolocation(
     # Get time data and convert to datetime objects
     time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
     i0, i1 = indices
+    use_obs = np.s_[i0:i1]
     t_stamp = time_utc[i0].strftime("%H%M%S")
     orb_num = nc_data["Science/orbit_number"][i0]
-    # FIXME: Attempt to trim slewing observations at start and finish
-    # if i1 - i0 > 12:
-    #     use_obs = np.s_[i0 + 5 : i1 - 5]
-    # else:
-    use_obs = np.s_[i0:i1]
     time_utc = time_utc[use_obs]
     plot_type = "geolocation"
 
@@ -685,13 +677,9 @@ def plot_ancillary(
     # Get time data and convert to datetime objects
     time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
     i0, i1 = indices
+    use_obs = np.s_[i0:i1]
     t_stamp = time_utc[i0].strftime("%H%M%S")
     orb_num = nc_data["Science/orbit_number"][i0]
-    # FIXME: Attempt to trim slewing observations at start and finish
-    # if i1 - i0 > 12:  # Slew from SkyCal at start? Trim a few steps?
-    #     use_obs = np.s_[i0 + 5 : i1 - 5]
-    # else:
-    use_obs = np.s_[i0:i1]
     time_utc = time_utc[use_obs]
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
     plot_type = "ancillary"
@@ -906,15 +894,6 @@ def plot_calibration(
             height_ratios=[1, 1, 1, 1, 0.25],
         )
         for col in range(num_cols):  # Iterate over columns (Stokes parameters)
-            # Auto-scaling of Ta and Tb range (not a good idea, but save for later?)
-            # vmins, vmaxs = [], []
-            # for row in range(1, 5):  # Iterate over TA1...TA4 or TB1...TB4
-            #     var_name = f"{tkind_vars[kk]}{row}"
-            #     data = nc_data[var_name][i0:i1, :, col]  # Shape:(ObsRate, Freq_Array)
-            #     vmins.append(data.min())
-            #     vmaxs.append(data.max())
-            # vmin, vmax = min(vmins), max(vmaxs)
-
             # Set fixed scale for Ta and Tb
             if not t_diff:
                 match stokes[col].upper():
@@ -949,7 +928,6 @@ def plot_calibration(
                 )
                 ax.set_title(f"{var_title} Stokes {stokes[col]}")
                 ax.set_xlim([-FREQ_DELTA_MHZ, +FREQ_DELTA_MHZ])
-                # ax.xaxis.set_major_locator(plt.MaxNLocator(7))
                 if row == num_rows - 1:
                     ax.set_xlabel("Offset from Center Frequency (MHz)\n   ")
                 else:
@@ -1057,10 +1035,6 @@ def plot_retrieved_b_fields(
     t_stamp = time_utc[0].strftime("%H%M%S")
     orb_num = nc_data["Science/orbit_number"][0]
     sc_id = nc_data["Metadata/SpaceVehicle"][0]
-    # FIXME: Attempt to trim slewing observations at start and finish
-    # if len(time_utc) > 12:
-    #     use_obs = np.s_[5:-5]
-    # else:
     use_obs = np.s_[:]
 
     max_win = len(time_utc[use_obs])
@@ -1435,7 +1409,7 @@ def plot_retrieved_bd_only(
         )
         return
 
-    # FIXME: Attempt to trim slewing observations at start and finish
+    # QUERY: Attempt to further trim SV slewing from observations at start and finish?
     # if len(time_utc) > 12:
     #     use_obs = np.s_[5:-5]
     # else:

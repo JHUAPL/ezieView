@@ -92,8 +92,6 @@ BOUNDS[EQUATORIAL] = [-40.0, +40.0]
 BOUNDS[SOUTH] = [-90.0, -45.0]
 GEO_LAT_LOWER_LIMIT = 40.0
 MAG_LAT_LOWER_LIMIT = 40.0
-# BOUND_POLAR = 40.0  # degrees, absolute value
-# BOUND_EQUATORIAL = 35.0  # degrees, absolute value
 
 SAT_COL = "#FF800E"  # From colorblind-friendly palette
 
@@ -106,13 +104,13 @@ MEM_NUMBERS = [1, 2, 3, 4]  # handle switch from 0..3 and 1..4, indexing vs nami
 NUM_MEM = len(MEM_NUMBERS)
 
 MEM_SYMS = ["o", "o", "o", "o"]
-# MEM_CLR = ["blue", "red", "green", "orange"]  # Default
 MEM_CLR = [
     "orange",  #     MEM1 - (default "nadir")
     "limegreen",  #  MEM2 - negative angle from nadir
     "crimson",  #    MEM3 - negative angle from nadir
     "dodgerblue",  # MEM4 - positive angle from nadir
 ]  # Easier to differentiate than "Default" red-green-blue-orange
+# MEM_CLR = ["blue", "red", "green", "orange"]  # Default
 MEM_CB_CLR = [
     "C4",  # MEM1 - Cerulean/Blue
     "C5",  # MEM2 - Tenne (Tawny)/Orange
@@ -122,7 +120,6 @@ MEM_CB_CLR = [
 # C0 and C1 are used elsewhere for plotting.
 
 # TODO: What angles and/or reference frames preferred here? Update to use JPL standard?
-# MEM_LK_ANGL = [-48.7, -20.3, 0.0, 42.7]
 MEM_LOOK_DIRECTIONS = [
     +0.00,  # MEM1
     -26.0,  # MEM2

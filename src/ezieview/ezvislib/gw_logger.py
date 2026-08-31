@@ -33,6 +33,8 @@ def initialize_logging(
         log_level     (int,  optional): Defaults to logging.INFO.
         rotating      (bool, optional): Use a timed daily rotating log file.
                                         Default=False
+        timestamp     (bool, optional): Prefix log file name with timestamp.
+                                        Default=True
         open_console  (bool, optional): Open Console.app w/log file (macOS).
                                         Default=False
         jupyter       (bool, optional): Sleeker logging for notebooks. Default=False.
