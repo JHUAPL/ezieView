@@ -136,24 +136,16 @@ def main(
 
     # Create list of highest version/revision for a given spacecraft and date. For
     # products that require separation of full-day files into individual science passes,
-    # that segmentation will be performed in the individual product method.
-    if "_l1_" in file_pattern:
-        # FIXME: Switching to per-orbit L1 files rather than dailies.
-        keep_files = filter_files_by_version(
-            file_directory=file_directory,
-            file_pattern=file_pattern,
-            start_date=start_date,
-            stop_date=stop_date,
-            remove_near_dupes=True,
-        )
-    else:
-        keep_files = filter_files_by_version(
-            file_directory=file_directory,
-            file_pattern=file_pattern,
-            start_date=start_date,
-            stop_date=stop_date,
-            remove_near_dupes=True,  # FIXME: Set False for test files lacking revisions
-        )
+    # that segmentation will be performed in the individual product method. We've now
+    # switched to using per-orbit L1 files rather than dailies, matching corresponding
+    # L2+L3 products.
+    keep_files = filter_files_by_version(
+        file_directory=file_directory,
+        file_pattern=file_pattern,
+        start_date=start_date,
+        stop_date=stop_date,
+        remove_near_dupes=True,  # NOTE: Set False for test files lacking revisions
+    )
 
     if keep_files is None:
         logger.error("No files found matching date specifications. Exiting")
@@ -165,22 +157,22 @@ def main(
 
     # Change file sorting from a purely lexicographical order (including the full path!)
     # to a sort based on date and time primarily and SV only secondarily.
-    # TBD: Process oldest data first? Use srt_list
-    # TBD: Process newest data first? Use srt_list[::-1]
     new_list = []
     for ndx, each_file in enumerate(keep_files):
         prsd = parse_ezie_product_name(each_file)
         new_list.append((ndx, prsd.spcv, prsd.dttm))
     srt_list = sorted(new_list, key=lambda f: (f[2], f[1]))
-    # keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::-1]] # newest first
-    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::+1]]  # oldest first
+
+    # Now select date order processing - ascending or descending.
+    # Oldest data first? srt_list[::+1]. Newest data first? srt_list[::-1].
+    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::+1]]
 
     # Create output directory for storage of plot files if it does not already exist
     out_dir_path = Path(plots_directory)
     if not out_dir_path.exists():
         out_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # FIXME: Need to load these until such time as all relevant data is available
+    # NOTE: Need to load these until such time as all relevant data is available
     # directly from .nc4 files. We are currently lacking:
     # 1) SV magnetic coordinates (lat, lon, MLT)
     # 2) Solar subpoint magnetic (and geodetic?) coordinates to correctly orient MLT
@@ -222,30 +214,8 @@ def main(
                 product = nc_data.getncattr("product")
                 if product == "L1":
                     logger.info(f"Processing {product} file {Path(each_file).name}")
-
-                    #     # TODO: Grab pipeline version info from corresponding L2 file as
-                    #     # it is not yet incorporated in this product level. REMOVE once
-                    #     # product files have been updated.
-                    #     git_branch = None
-                    #     git_commit = None
-                    #     prsd = parse_ezie_product_name(each_file)
-                    #     source_l2 = (
-                    #         each_file.as_posix()
-                    #         .replace("l1/orbit", "l2")
-                    #         .replace("ezie_l1", "ezie_l2")
-                    #         .replace(f"_{prsd.orbt}", "")
-                    #     )
-
-                    #     try:
-                    #         with Dataset(source_l2, mode="r") as l2_data:
-                    #             git_branch = f"{l2_data['Configuration/git_branch'][:]}"
-                    #             git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-                    #     except Exception as exc:
-                    #         logger.warning(
-                    #             "Unable to get commit & hash from source L2 file:"
-                    #         )
-                    #         logger.warning(f"==> {source_l2}")
-                    #         logger.warning(f"Exception was: {exc}")
+                    # Calibration plots requires L1 product file - not populated in L2
+                    # product ATM.
 
                     # Slice out the time intervals during which we may have had MEM
                     # observations.
@@ -253,11 +223,11 @@ def main(
                     pass_indices = [[0, -1]]  # When using per-orbit L1 files as inputs
 
                     for index_pair in pass_indices:
-                        # Requires L1 product file - not populated in L2 product ATM
-                        # FIXME: Passing tdiff=True will plot the temperature
-                        # differences from one time step to the next, rather than the
-                        # current value at that timestep (project scientist request).
+                        # NOTE: Passing tdiff=True will plot the temperature differences
+                        # from one time step to the next, rather than the current value
+                        # at that timestep (project scientist request).
                         # for t_diff in [True, False]:
+
                         for t_diff in [False]:
                             gw_plot_methods.plot_calibration(
                                 nc_data=nc_data,
@@ -266,8 +236,6 @@ def main(
                                 save_directory=out_dir_path,
                                 t_diff=t_diff,
                                 overwrite=overwrite,
-                                # git_branch=git_branch,
-                                # git_commit=git_commit,
                                 dark_mode=dark_mode,
                                 figure_dpi=figure_dpi,
                             )
@@ -278,8 +246,6 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
-                            # git_branch=git_branch,
-                            # git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L0A or higher level product file
@@ -290,8 +256,6 @@ def main(
                             indices=index_pair,
                             save_directory=out_dir_path,
                             overwrite=overwrite,
-                            # git_branch=git_branch,
-                            # git_commit=git_commit,
                             figure_dpi=figure_dpi,
                             dark_mode=dark_mode,
                         )  # Requires L1 or higher level product files
@@ -366,11 +330,10 @@ def main(
                     )
 
         elif "l3" in each_file.stem.lower():
-            # TODO # L3 files do not yet have any of the common metadata or variables?
-
-            # TODO: Grab pipeline version info fromm corresponding L2 file as it is not
-            # yet incorporated in this product level. REMOVE once product files have
-            # been updated.
+            # TODO L3 files do not yet have any of the common metadata or variables?
+            # Grab pipeline version info fromm corresponding L2 file as it is not yet
+            # incorporated in this product level. REMOVE once product files have been
+            # updated.
             source_l2 = each_file.as_posix().replace("l3", "l2")
             try:
                 with Dataset(source_l2, mode="r") as l2_data:
@@ -406,9 +369,10 @@ def main(
                     git_commit=git_commit,  # Not yet in L3 product, borrowed from L2
                     overwrite=overwrite,
                     dark_mode=dark_mode,
-                    figure_dpi=200,  # FIXME - What Brent was using, keep for now
+                    figure_dpi=200,
                 )
 
+                # L3 files do not yet have any of the common metadata or variables.
                 # if nc_data.getncattr("product") == "L3":
                 #     logger.info(f"Processing L3 file {Path(each_file).name}")
                 # else:

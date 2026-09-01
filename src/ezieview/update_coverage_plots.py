@@ -150,23 +150,19 @@ def plot_mlt_sza_coverage(
 
             sampled = np.zeros((len(SPACECRAFT), len(MEM_NUMBERS)))
             cmax = 2
-            # Make 2-D histograms of coverage, filtering on hemisphere, spacecraft,
-            # and science data collection status. Gather data for ALL spacecraft and
-            # MEMs first, so we can standardize the scaling for all to a uniform
-            # range.
+            # Make 2-D histograms of coverage, filtering on hemisphere, spacecraft, and
+            # science data collection status. Gather data for ALL spacecraft and MEMs
+            # first, so we can standardize the scaling for all to a uniform range.
             for sndx, spcrft in enumerate(SPACECRAFT):
                 cvrg[regn][sndx] = {}
                 for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
-                    # Determine spacecraft science-collection/space-look status
+                    # Determine MEM-specific science-collection/space-look status,
+                    # creating a data collection event (dce) mask tied to the time step.
                     scuse = sc_id == spcrft
                     rguse = (mem_mlat[mem_ndx] >= BOUNDS[regn][0]) & (
                         mem_mlat[mem_ndx] <= BOUNDS[regn][1]
                     )
                     lvuse = mem_mode[mem_ndx]
-                    # Determine spacecraft's science-collection/space-look status
-                    # TOD: Do we really need to track the difference between 'use' and
-                    # dce' anymore, can we not just generate a single boolean mask for
-                    # the points meeting all criteria?
                     dce = lvuse & scuse & rguse
                     sampled[sndx, mem_ndx] += np.sum(dce)
                     # Diagnostics - sample sizes for each plot
@@ -398,6 +394,7 @@ def plot_daily_maps(
     # Select region[s] and plot ID suffixes to be generated, collected in lists. Loop
     # through all plot types and regions, skipping formats that are inappropriate for a
     # given type or region.
+
     # Polar plots, north and south AEJ
     for ptype in [
         data_collect_geo,
@@ -418,8 +415,8 @@ def plot_daily_maps(
                     show_mag_lat = True
                     plot_method = coverage_plot_stereographic_layout
                 else:
+                    # NOTE: MEM mlat used as proxy for SV mlat right now
                     MLT_sign = -1 if (south_inverted and regn == SOUTH) else +1
-                    # FIXME: SC mlat is faked with MEM mlat right now
                     xcrd = sc_MLT * 15.0
                     ycrd = sc_mlat
                     xmem = mem_MLT * 15.0
@@ -465,9 +462,6 @@ def plot_daily_maps(
 
                         for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
                             # Determine overall SV science-collection/space-look status
-                            # rguse = (mem_mlat[mem_ndx] >= BOUNDS[regn][0]) & (
-                            #     mem_mlat[mem_ndx] <= BOUNDS[regn][1]
-                            # )
                             dce = mem_mode[mem_ndx] & scuse & rguse
                             slk = (~mem_mode[mem_ndx]) & scuse & rguse
                             sampled[sndx, mem_ndx] += np.sum(dce)
@@ -484,8 +478,8 @@ def plot_daily_maps(
                                 f"{np.sum(dce):5d}"
                             )
 
-                        # TODO: Speed up plotting of maps. Why are they so slow? Is it
-                        # the calculating or the rendering that is so slow? TBD
+                        # TODO: Speed up plotting of maps. Are the calculations or the
+                        # rendering the bottlenck? TBD
                         if "mem-observation" in ptype:  # plot MEM footprint[s]
                             all_axs[sndx].plot(
                                 MLT_sign * xcrd[scuse & rguse],

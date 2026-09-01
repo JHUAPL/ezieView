@@ -787,6 +787,18 @@ def plot_calibration(
     """
     Plot the calibrated Ta and Tb scene temperatures as images with frequency on the x
     axis and time on the y axis.
+
+    Args:
+        nc_data (Dataset): _description_
+        source (Path): _description_
+        indices (tuple): _description_
+        save_directory (Path): _description_
+        git_branch (str | None, optional): _description_. Defaults to None.
+        git_commit (str | None, optional): _description_. Defaults to None.
+        t_diff (bool, optional): _description_. Defaults to False.
+        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
+        dark_mode (bool, optional): _description_. Defaults to False.
+        overwrite (bool, optional): _description_. Defaults to False.
     """
     if dark_mode:
         plt.style.use("dark_background")
@@ -1011,10 +1023,27 @@ def plot_retrieved_b_fields(
     Plot the retrieved B fields for each MEM in two formats, along with their estimated
     errors. Errors for individual dBs are calculated from the derived covariance values.
     Errors for the total B field are calculated as a weighted average of the errors from
-    each inidiviual N-E-D component. The two formats are:
+    each individual N-E-D component. The two formats are:
     1) Just the dBs for the N-E-D components ( 4 MEM x 3 B )
     2) Both the N-E-D components and the B totals for each MEM ( 4 MEM x 4 B )
+
+    Args:
+        nc_data (Dataset): _description_
+        source (Path): _description_
+        save_directory (Path): _description_
+        version (str | None, optional): _description_. Defaults to None.
+        dark_mode (bool, optional): _description_. Defaults to False.
+        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
+        overwrite (bool, optional): _description_. Defaults to False.
+
+    Returns:
+        None
     """
+
+    #
+    # Returns:
+    # None
+
     logger.info("Generating retrieved and reference B field plots")
     if dark_mode:
         plt.style.use("dark_background")
@@ -1866,6 +1895,9 @@ def map_sc_mem_footprints(
         at_time (datetime.datetime, optional): _description_. Defaults to None.
         terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
         dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+
+    Returns:
+        None
     """
     map_axs.set_global()
     map_axs.add_feature(
@@ -2035,6 +2067,9 @@ def map_sc_mem_footprints_magnetic(
         at_time (datetime.datetime, optional): _description_. Defaults to None.
         terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
         dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+
+    Returns:
+        None
     """
     if (hemisphere is None) or (hemisphere == NORTH) or south_inverted:
         ccw = +1
@@ -2208,14 +2243,21 @@ def plot_mag_and_geo_maps(
     south_inverted: bool = False,
     overwrite: bool = False,
 ):
-    """
-    Purpose:
+    """Generate maps showing Earth's magnetic field and geographic coordinates.
 
     Args:
+        nc_data (Dataset): _description_
+        source (Path): _description_
+        save_directory (Path): _description_
+        figure_dpi (int, optional): _description_. Defaults to 300.
+        dark_mode (bool, optional): _description_. Defaults to False.
+        south_inverted (bool, optional): _description_. Defaults to False.
+        overwrite (bool, optional): _description_. Defaults to False.
 
     Returns:
         None
     """
+
     if dark_mode:
         plt.style.use("dark_background")
         plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
@@ -2716,6 +2758,20 @@ def sza_overlay(
     magnetic=False,
     time4mag=None,
 ):
+    """_summary_
+
+    Args:
+        map_axs (_type_): _description_
+        MLT_sign (_type_): _description_
+        sun_lat_rad (_type_): _description_
+        sun_lon_rad (_type_): _description_
+        sun_mlon_deg (_type_, optional): _description_. Defaults to None.
+        magnetic (bool, optional): _description_. Defaults to False.
+        time4mag (_type_, optional): _description_. Defaults to None.
+
+    Returns:
+        None
+    """
     # Compute dot product of normal vector at each location on earth with the vector to
     # the sun at the appropriate time to establish SZA grid.
     lonvec = np.radians(np.linspace(-180, 180, 91))
@@ -3272,18 +3328,13 @@ def ingest_full_day_all_sv(
     latitude, MLT, and solar zenith angles), and combines them into a unified
     dictionary containing data for all orbits of the day.
 
-    Parameters
-    ----------
-    run_date : str
-        The date to process, formatted as 'YYYYMMDD'.
-    used_files : list
-        A list of file paths (Path objects or strings) pointing to the L1 NetCDF
-        files to be ingested.
+    Args:
+        run_date (str): The date to process, formatted as 'YYYYMMDD'.
+        used_files (list): A list of file paths (Path objects or strings) pointing to
+            the L1 NetCDF files to be ingested.
 
-    Returns
-    -------
-    tuple
-        A tuple containing:
+    Returns:
+        (tuple):
         - full_day (dict): A dictionary where keys are variable names (e.g., 'sat_lat',
           'obs_maglat1') and values are numpy arrays of the aggregated data for all
           spacecraft and orbits on the given date.
@@ -3414,10 +3465,23 @@ def plot_retrieved_B_and_J(
     errors. Errors for individual dBs are calculated from the derived covariance values.
 
     Args:
+        nc2_data (Dataset): _description_
+        nc2_sorc (Path): _description_
+        save_directory (Path): _description_
+        version (str | None, optional): _description_. Defaults to None.
+        mode (str, optional): _description_. Defaults to "Uncorrected".
+        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
+        dark_mode (bool, optional): _description_. Defaults to False.
+        south_inverted (bool, optional): _description_. Defaults to False.
+        overwrite (bool, optional): _description_. Defaults to False.
+
+    Raises:
+        TypeError: _description_
 
     Returns:
         None
     """
+
     nc3_sorc: Path = Path(nc2_sorc.as_posix().replace("l2", "l3"))
     if not nc3_sorc.exists():
         logger.error(

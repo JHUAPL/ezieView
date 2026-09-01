@@ -1,5 +1,7 @@
 # ezieView
 
+## About
+
 - The ezieView python package is a subset of the image generation routines developed for
   the EZIE Science Gateway, repackaged so as to be pip-installable.
 
@@ -9,6 +11,8 @@
 
 - Make images by running any of the following or alternatively using a shell script like
   the one shown below.
+
+## CLI Usage
 
 ```bash
 . .venv/bin/activate

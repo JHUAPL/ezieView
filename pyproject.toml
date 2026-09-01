@@ -1,10 +1,10 @@
 [build-system]
-requires = ["uv_build >= 0.9.0","uv_build < 0.12"]
+requires = ["uv_build >= 0.9.0","uv_build < 0.13"]
 build-backend = "uv_build"
 
 [project]
 name = "ezieView"
-version = "0.1.2"
+version = "0.1.3"
 authors = [
   { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
 ]
@@ -22,16 +22,6 @@ dependencies = [
   "scipy",
   "spiceypy",
 ]
-
-# TODO: Should we specify these in pip-installable package, or just build environment?
-#  "pdoc3",
-# "mkdocs",
-# "mkdocs-material",
-# "mkdocstrings-python",
-
-# TODO: Just put example script in README? TBD
-# [tool.setuptools]
-# script-files = [ "make_ezie_images.sh" ]
 
 [project.scripts]
 view_coverage = "ezieview.update_coverage_plots:main" 
