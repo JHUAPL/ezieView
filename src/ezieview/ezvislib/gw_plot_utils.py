@@ -344,8 +344,8 @@ def filter_daily_files_by_version(
     """
     Create list of highest version/revision for a given spacecraft and date.
     """
-    # log_mthd = logger.debug
-    log_mthd = logger.info
+    log_mthd = logger.debug
+    # log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
@@ -406,8 +406,8 @@ def filter_files_by_version(
     """
     Create list of highest version/revision for a given spacecraft and date.
     """
-    # log_mthd = logger.debug
-    log_mthd = logger.info
+    log_mthd = logger.debug
+    # log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
@@ -426,6 +426,7 @@ def filter_files_by_version(
             logger.error(f"Invalid file name encountered: {each_file.stem}")
             continue  # file name was NOT valid
         file_dttm = jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time)
+        # Deal with invalid datetime formats
         # file_dttm = datetime.datetime.strptime(
         #     f"{prsd.date}_{prsd.time}", dttm_frmt
         # ).replace(tzinfo=datetime.UTC)
