@@ -1,3 +1,21 @@
+"""
+Generate EZIE single-orbit summary plots.
+
+For each per-orbit product file in the requested date range, produces calibration,
+geolocation, ancillary, and retrieved plasma parameter plots, as appropriate for the
+product level (L1, L2, or L3).
+
+Example command line--run from repo root, in an activated python venv:
+
+\b
+view_orbits \
+    -d0 2025-06-20 \
+    -d1 2025-06-22 \
+    -fd '/project/ezie/data/l2' \
+    -fp 'ezie_l2_*.nc4' \
+    -pd "/project/ezie/plots/single-orbit"
+"""
+
 # region imports
 import datetime
 from pathlib import Path
@@ -121,6 +139,24 @@ def main(
         -fp 'ezie_l2_*.nc4'  \\
         -pd "/project/ezie/plots/single-orbit"
 
+    Args:
+        start_date (datetime.datetime): Start date of entries to be processed.
+        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
+            processed.
+        file_directory (str): Root directory path to be searched for EZIE input
+            files.
+        file_pattern (str): Pattern of file path to be searched for EZIE input
+            files.
+        plots_directory (str): Root directory in which to save generated plot files.
+        merged_l2_l3 (bool): Generate a figure with both L2 and L3 results plotted.
+        overwrite (bool): Overwrite existing files. If not set, any existing files
+            will be skipped.
+        dark_mode (bool): Generate plots using 'dark mode' format.
+        figure_dpi (int): Resolution (DPI) at which to generate the plots.
+
+    Returns:
+        int: 0 on success, 1 if no files were found matching the date
+            specifications.
     """
     # python3 update_orbit_plots.py \\
     # Begin - configure logging, log all supplied arguments

@@ -1,3 +1,23 @@
+"""
+Generate EZIE full-day coverage summary plots.
+
+For each date in the requested range, produces:
+- MEM coverage histograms (magnetic latitude, MLT, and solar zenith angle),
+  broken down by orbit and MEM, and
+- polar stereographic and Mollweide maps of spacecraft passes and MEM
+  observation locations, broken down by orbit.
+
+Example command line--run from repo root, in an activated python venv:
+
+\b
+view_coverage \
+    -d0 2025-06-20 \
+    -d1 2025-06-22 \
+    -fd '/project/ezie/data/l1' \
+    -fp 'ezie_l1_*.nc4' \
+    -pd "/project/ezie/plots/daily-summary"
+"""
+
 # region imports
 import datetime
 from pathlib import Path
@@ -80,25 +100,38 @@ def plot_mlt_sza_coverage(
     figure_dpi: int = DFLT_RES,
 ):
     """
-    Generate bar plots showing daily coverage, broken down by orbit and MEM, for:
-        1. Magnetic latitude
-        2. Magnetic Local Time
-        3. Solar Zenith Angle
-        Break L1 for each SV into orbits so we can make 2-D histogram of coverage versus
-        orbit for this day, rather than just determining coverage for day as a whole.
+    Generate 2-D histograms showing daily coverage, broken down by orbit and MEM,
+    for:
+    1. Magnetic latitude
+    2. Magnetic Local Time
+    3. Solar Zenith Angle
+
+    Breaks L1 data for each SV into orbits so we can make a 2-D histogram of
+    coverage versus orbit for this day, rather than just determining coverage for
+    the day as a whole. One figure is generated per region and coverage type, with
+    one panel per spacecraft and MEM.
 
     Args:
-        obs_date (datetime.datetime): _description_
-        sc_id (np.ndarray): _description_
-        orbit (np.ndarray): _description_
-        mem_mlat (np.ndarray): _description_
-        mem_MLT (np.ndarray): _description_
-        mem_sza (np.ndarray): _description_
-        mem_mode (np.ndarray): _description_
-        regions (list): _description_
-        dark_mode (bool, optional): _description_. Defaults to False.
-        overwrite (bool, optional): _description_. Defaults to False.
-        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
+        obs_date (datetime.datetime): UTC date of the observations being plotted.
+        sc_id (np.ndarray): Spacecraft ID for each observation sample.
+        orbit (np.ndarray): Orbit number for each observation sample.
+        mem_mlat (np.ndarray): Magnetic latitude of each MEM footprint, stacked
+            over the 4 MEMs (rows) x samples (cols).
+        mem_MLT (np.ndarray): Magnetic local time of each MEM footprint,
+            stacked as above.
+        mem_sza (np.ndarray): Solar zenith angle of each MEM footprint,
+            stacked as above.
+        mem_mode (np.ndarray): Boolean flag (True = EARTHLOOK, False = SKYLOOK)
+            for each MEM, stacked as above.
+        output_dir (Path): Root directory in which to save the generated plot files.
+        regions (list): Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
+            observations and therefore need plots.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files. If not set,
+            any existing files will be skipped. Defaults to False.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
     """
 
     orb_min = np.min(orbit)
@@ -366,6 +399,39 @@ def plot_daily_maps(
     orbit, in two formats:
     1) Distinguishing between data collection events and space-look operations, and
     2) Mapping the locations observed during each orbit by each individual MEM.
+
+    Mollweide maps are also generated when EQUATORIAL is included in regions.
+
+    Args:
+        obs_date (datetime.datetime): UTC date of the observations being plotted.
+        sc_id (np.ndarray): Spacecraft ID for each observation sample.
+        orbit (np.ndarray): Orbit number for each observation sample.
+        sclat (np.ndarray): Geographic latitude of the spacecraft for each sample.
+        sclon (np.ndarray): Geographic longitude of the spacecraft for each sample.
+        sc_mlat (np.ndarray): Magnetic latitude of the spacecraft for each sample.
+        sc_MLT (np.ndarray): Magnetic local time of the spacecraft for each sample.
+        mem_lat (np.ndarray): Geographic latitude of each MEM footprint, stacked
+            over the 4 MEMs (rows) x samples (cols).
+        mem_lon (np.ndarray): Geographic longitude of each MEM footprint,
+            stacked as above.
+        mem_mlat (np.ndarray): Magnetic latitude of each MEM footprint,
+            stacked as above.
+        mem_MLT (np.ndarray): Magnetic local time of each MEM footprint,
+            stacked as above.
+        mem_mode (np.ndarray): Boolean flag (True = EARTHLOOK, False = SKYLOOK)
+            for each MEM, stacked as above.
+        output_dir (Path): Root directory in which to save the generated plot files.
+        regions (list): Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
+            observations and therefore need plots.
+        south_inverted (bool, optional): Invert the MLT axis on the southern
+            hemisphere plot (heliospheric community mapping style).
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files. If not set,
+            any existing files will be skipped. Defaults to False.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
     """
 
     # Plot marker type and size specs
@@ -913,14 +979,14 @@ year.
 )
 # endregion cli
 def main(
-    start_date,
-    stop_date,
-    file_directory,
-    file_pattern,
-    plots_directory,
-    overwrite,
-    dark_mode,
-    figure_dpi,
+    start_date: datetime.datetime,
+    stop_date: datetime.datetime,
+    file_directory: str,
+    file_pattern: str,
+    plots_directory: str,
+    overwrite: bool,
+    dark_mode: bool,
+    figure_dpi: int,
 ) -> int:
     """
     Generate a set of EZIE full-day summary plots based on the specified date and
@@ -938,6 +1004,23 @@ def main(
         -fp 'ezie_l1_*.nc4'  \\
         -pd "/project/ezie/plots/daily-summary"
 
+    Args:
+        start_date (datetime.datetime): Start date of entries to be processed.
+        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
+            processed.
+        file_directory (str): Root directory path to be searched for EZIE input
+            files.
+        file_pattern (str): Pattern of file path to be searched for EZIE input
+            files.
+        plots_directory (str): Root directory in which to save generated plot files.
+        overwrite (bool): Overwrite existing files. If not set, any existing files
+            will be skipped.
+        dark_mode (bool): Generate plots using 'dark mode' format.
+        figure_dpi (int): Resolution (DPI) at which to generate the plots.
+
+    Returns:
+        int: 0 on success, 1 if no files were found matching the date
+            specifications.
     """
     # python3 update_coverage_plots.py \\
     # Begin - configure logging, log all supplied arguments
