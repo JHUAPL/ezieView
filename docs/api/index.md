@@ -1,4 +1,3 @@
-
 # EzieView API Reference
 
 ::: ezieview.update_coverage_plots
@@ -11,3 +10,4 @@
 ::: ezieview.ezvislib.gw_plot_params
 ::: ezieview.ezvislib.gw_plot_utils
 ::: ezieview.ezvislib.gw_plot_methods
+::: ezieview.ezvislib.kernel_mgr
