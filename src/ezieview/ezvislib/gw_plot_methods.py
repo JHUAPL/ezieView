@@ -123,6 +123,34 @@ NCDF_MISSING = default_fillvals["f4"]
 # mpl.rcParams.update(rc_fonts)
 
 
+def plot_update_required(
+    source: Path,
+    ftgt: Path,
+    plot_type: str,
+    old_hash: str,
+    new_hash: str,
+    overwrite: bool = False,
+):
+    if ftgt.exists():
+        if old_hash == new_hash:
+            if not overwrite:
+                logger.info(
+                    f"File exists, source hash unchanged, skipping: {ftgt.name}"
+                )
+                return False
+            else:
+                logger.info(
+                    f"File exists but overwrite flag is set, replacing: {ftgt.name}"
+                )
+        else:
+            logger.info(
+                f"Source file hash has changed, updating plot for: {source.name}"
+            )
+    else:
+        logger.info(f"File does not exist, creating {plot_type} plot: {ftgt.name}")
+    return True
+
+
 def coverage_plot_polar_layout(
     observation_date: datetime.datetime,
     hemisphere: str,
@@ -131,6 +159,31 @@ def coverage_plot_polar_layout(
     south_inverted: bool = False,
     dark_mode: bool = False,
 ):
+    """
+    Instantiate the polar magnetic-coordinate (MLT vs magnetic latitude) layout
+    used for per-hemisphere coverage maps.
+
+    Creates one figure with a single row of polar stereographic axes, one per
+    spacecraft, oriented so that magnetic local time (MLT) runs around the
+    pole. Adds MLT and magnetic-latitude gridlines, an optional day/night
+    terminator, and magnetic continent overlays.
+
+    Args:
+        observation_date (datetime.datetime): UTC date, used for the plot
+            title.
+        hemisphere (str): Hemisphere to plot (e.g., NORTH or SOUTH).
+        show_terminator_at (datetime.datetime | None, optional): Time at which
+            to draw the day/night terminator. Defaults to None.
+        show_mag_lat (bool, optional): Show magnetic latitude gridlines.
+            Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
+        dark_mode (bool, optional): Use 'dark mode' styling. Defaults to False.
+
+    Returns:
+        tuple(plt.Figure, dict[int, GeoAxes]): The figure and a dict of the
+            per-spacecraft axes (keyed by spacecraft index).
+    """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
     if dark_mode:
         plt.style.use("dark_background")
@@ -286,6 +339,31 @@ def coverage_plot_stereographic_layout(
     south_inverted: bool = False,  # for compatibility w/other plot method calls
     dark_mode: bool = False,
 ):
+    """
+    Instantiate the geographic (geodetic lat/lon) polar stereographic layout
+    used for per-hemisphere coverage maps.
+
+    Creates one figure with a single row of polar stereographic axes, one per
+    spacecraft, in geographic coordinates. Adds geographic lat/lon gridlines,
+    an optional day/night terminator, and coastlines; optionally overlays
+    magnetic latitude gridlines.
+
+    Args:
+        observation_date (datetime.datetime): UTC date, used for the plot
+            title.
+        hemisphere (str): Hemisphere to plot (e.g., NORTH or SOUTH).
+        show_terminator_at (datetime.datetime | None, optional): Time at which
+            to draw the day/night terminator. Defaults to None.
+        show_mag_lat (bool, optional): Overlay magnetic latitude gridlines in
+            addition to the geographic grid. Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere
+            (heliospheric community mapping style). Defaults to False.
+        dark_mode (bool, optional): Use 'dark mode' styling. Defaults to False.
+
+    Returns:
+        tuple(plt.Figure, dict[int, GeoAxes]): The figure and a dict of the
+            per-spacecraft axes (keyed by spacecraft index).
+    """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
     if dark_mode:
         plt.style.use("dark_background")
@@ -412,6 +490,30 @@ def mollweide_layout(
     show_mag_lat: bool = False,
     dark_mode: bool = False,
 ):
+    """
+    Instantiate the equatorial Mollweide layout used for equatorial coverage
+    maps.
+
+    Creates one figure with a single column of Mollweide-projection axes, one
+    per spacecraft (num_sc of them), in geographic coordinates. Adds lat/lon
+    gridlines, an optional day/night terminator, and coastlines; optionally
+    overlays magnetic latitude gridlines.
+
+    Args:
+        observation_date (datetime.datetime): UTC date, used for the plot
+            title.
+        show_terminator_at (datetime.datetime | None, optional): Time at which
+            to draw the day/night terminator. Defaults to None.
+        num_sc (int, optional): Number of spacecraft (axes) to create.
+            Defaults to 1.
+        show_mag_lat (bool, optional): Overlay magnetic latitude gridlines in
+            addition to the geographic grid. Defaults to False.
+        dark_mode (bool, optional): Use 'dark mode' styling. Defaults to False.
+
+    Returns:
+        tuple(plt.Figure, dict[int, GeoAxes]): The figure and a dict of the
+            per-spacecraft axes (keyed by spacecraft index).
+    """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
     if dark_mode:
         plt.style.use("dark_background")
@@ -519,6 +621,25 @@ def plot_geolocation(
     """
     Plot geolocation parameters using L2 files (or any other product level containing
     the required geolocation fields).
+
+    Args:
+        nc_data (Dataset): Open netCDF4 Dataset of the product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        indices (tuple): (Start, stop) observation index pair delimiting the
+            science pass to plot.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        git_branch (str | None, optional): Pipeline branch to display when the
+            product does not carry one. Defaults to None.
+        git_commit (str | None, optional): Pipeline commit hash to display
+            when the product does not carry one. Defaults to None.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
     """
     if dark_mode:
         plt.style.use("dark_background")
@@ -547,14 +668,15 @@ def plot_geolocation(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
-
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type="geolocation",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
         return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
-
-    logger.info("Generating geolocation plot")
 
     # Prepare subplots for grouped geolocation parameters
     rows = 5
@@ -667,7 +789,26 @@ def plot_ancillary(
     overwrite: bool = False,
 ):
     """
-    Plot the reference IGRF B field values stored in the Ancillary group
+    Plot the reference IGRF-14 B field values stored in the Ancillary group.
+
+    Args:
+        nc_data (Dataset): Open netCDF4 Dataset of the product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        indices (tuple): (Start, stop) observation index pair delimiting the
+            science pass to plot.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        git_branch (str | None, optional): Pipeline branch to display when the
+            product does not carry one. Defaults to None.
+        git_commit (str | None, optional): Pipeline commit hash to display
+            when the product does not carry one. Defaults to None.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
     """
     if dark_mode:
         plt.style.use("dark_background")
@@ -694,12 +835,15 @@ def plot_ancillary(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type="ancillary (IGRF)",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
         return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
-    logger.info("Generating plot of ancillary (IGRF) data")
 
     # Prepare figure for plotting with sharex and sharey
     fig, axs = plt.subplots(
@@ -789,16 +933,26 @@ def plot_calibration(
     axis and time on the y axis.
 
     Args:
-        nc_data (Dataset): _description_
-        source (Path): _description_
-        indices (tuple): _description_
-        save_directory (Path): _description_
-        git_branch (str | None, optional): _description_. Defaults to None.
-        git_commit (str | None, optional): _description_. Defaults to None.
-        t_diff (bool, optional): _description_. Defaults to False.
-        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
-        dark_mode (bool, optional): _description_. Defaults to False.
-        overwrite (bool, optional): _description_. Defaults to False.
+        nc_data (Dataset): Open netCDF4 Dataset of the L1 product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        indices (tuple): (Start, stop) observation index pair delimiting the
+            science pass to plot.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        git_branch (str | None, optional): Pipeline branch to display when the
+            product does not carry one. Defaults to None.
+        git_commit (str | None, optional): Pipeline commit hash to display
+            when the product does not carry one. Defaults to None.
+        t_diff (bool, optional): Plot the temperature difference from one time
+            step to the next, rather than the value at each timestep.
+            Defaults to False.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
     """
     if dark_mode:
         plt.style.use("dark_background")
@@ -881,16 +1035,15 @@ def plot_calibration(
             name_only=True,
         )
         logger.debug(f"Checked file: {ftgt.as_posix()}")
-
-        if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-            logger.info(
-                f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}"
-            )
-            continue
-        if ftgt.exists() and (old_hash != new_hash):
-            logger.info("Source file hash has changed, updating plot")
-
-        logger.info(f"Generating calibrated scene temperature plot ({t_kind})")
+        if not plot_update_required(
+            source=source,
+            ftgt=ftgt,
+            plot_type=f"calibrated scene temperature ({t_kind})",
+            old_hash=old_hash,
+            new_hash=new_hash,
+            overwrite=overwrite,
+        ):
+            return
 
         fig, axs = plt.subplots(
             num_rows + 1,
@@ -1028,13 +1181,19 @@ def plot_retrieved_b_fields(
     2) Both the N-E-D components and the B totals for each MEM ( 4 MEM x 4 B )
 
     Args:
-        nc_data (Dataset): _description_
-        source (Path): _description_
-        save_directory (Path): _description_
-        version (str | None, optional): _description_. Defaults to None.
-        dark_mode (bool, optional): _description_. Defaults to False.
-        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
-        overwrite (bool, optional): _description_. Defaults to False.
+        nc_data (Dataset): Open netCDF4 Dataset of the L2 product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        version (str | None, optional): Product version/revision string
+            included in the plot file name. Defaults to None.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
 
     Returns:
         None
@@ -1401,6 +1560,23 @@ def plot_retrieved_bd_only(
     errors. Errors for individual dBs are calculated from the derived covariance values.
 
     Args:
+        nc_data (Dataset): Open netCDF4 Dataset of the L2 product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        version (str | None, optional): Product version/revision string
+            included in the plot file name. Defaults to None.
+        mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
+            Defaults to "Uncorrected".
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
 
     Returns:
         None
@@ -1467,12 +1643,15 @@ def plot_retrieved_bd_only(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
-
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type="retrieved B_d",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
         return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
 
     mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
@@ -1884,17 +2063,41 @@ def map_sc_mem_footprints(
     plain: bool = False,
     south_inverted: bool = False,
 ):
-    """Map geolocated S/C and MEM footprints
+    """
+    Map geolocated S/C and MEM footprints in geographic coordinates.
+
+    Overlays the spacecraft track and each MEM's observation footprint on the
+    supplied cartopy axes, with gridlines, coastlines, optional day/night
+    terminator, and a legend.
 
     Args:
-        map_axs (_type_, optional): _description_. Defaults to None.
-        sat_lat (np.ndarray, optional): _description_. Defaults to None.
-        sat_lon (np.ndarray, optional): _description_. Defaults to None.
-        obs_lat (np.ndarray, optional): _description_. Defaults to None.
-        obs_lon (np.ndarray, optional): _description_. Defaults to None.
-        at_time (datetime.datetime, optional): _description_. Defaults to None.
-        terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
-        dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+        map_axs (plt.Axes): Cartopy axes on which to draw the footprints.
+        sat_lat (np.ndarray): Spacecraft geodetic latitude per observation.
+        sat_lon (np.ndarray): Spacecraft geodetic longitude per observation.
+        obs_lat (np.ndarray): MEM footprint geodetic latitude, 4 MEMs (rows) x
+            observations (cols).
+        obs_lon (np.ndarray): MEM footprint geodetic longitude, 4 MEMs (rows)
+            x observations (cols).
+        at_time (datetime.datetime): Time used for the terminator and any
+            time-dependent overlays.
+        polar (bool, optional): Use a polar-style single-axis layout.
+            Defaults to False.
+        terminator (bool, optional): Show day/night with Nightshade.
+            Defaults to False.
+        dark_mode (bool, optional): Use 'dark_background' style.
+            Defaults to False.
+        zorder (int, optional): Base draw order for the footprint artists.
+            Defaults to 4.
+        small_text (bool, optional): Use smaller axis text. Defaults to False.
+        add_title (bool, optional): Add an axes title. Defaults to True.
+        legend_top (bool, optional): Place the legend at the top.
+            Defaults to False.
+        mid_lat_mag (bool, optional): Label latitude ticks in magnetic
+            latitude. Defaults to False.
+        plain (bool, optional): Draw footprints only, without grids, labels,
+            or legend. Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere
+            (heliospheric community mapping style). Defaults to False.
 
     Returns:
         None
@@ -2056,17 +2259,43 @@ def map_sc_mem_footprints_magnetic(
     plain: bool = False,
     south_inverted: bool = False,
 ):
-    """Map geolocated S/C and MEM footprints
+    """
+    Map geolocated S/C and MEM footprints in geomagnetic (APEX) coordinates.
+
+    Overlays the spacecraft track and each MEM's observation footprint on the
+    supplied cartopy axes in magnetic lat/MLT coordinates, with MLT and
+    magnetic-latitude gridlines, magnetic continent overlays, optional
+    day/night terminator, and a legend.
 
     Args:
-        map_axs (_type_, optional): _description_. Defaults to None.
-        sat_lat (np.ndarray, optional): _description_. Defaults to None.
-        sat_lon (np.ndarray, optional): _description_. Defaults to None.
-        obs_lat (np.ndarray, optional): _description_. Defaults to None.
-        obs_lon (np.ndarray, optional): _description_. Defaults to None.
-        at_time (datetime.datetime, optional): _description_. Defaults to None.
-        terminator (bool, optional): Show day/night with Nightshade. Defaults to False.
-        dark_mode (bool, optional): Use 'dark_background' style. Defaults to False.
+        map_axs (plt.Axes): Cartopy axes on which to draw the footprints.
+        sat_lat (np.ndarray): Spacecraft magnetic latitude per observation.
+        sat_lon (np.ndarray): Spacecraft MLT (in degrees) per observation.
+        obs_lat (np.ndarray): MEM footprint magnetic latitude, 4 MEMs (rows)
+            x observations (cols).
+        obs_lon (np.ndarray): MEM footprint MLT (in degrees), 4 MEMs (rows)
+            x observations (cols).
+        at_time (datetime.datetime): Time used for the magnetic model and
+            terminator.
+        hemisphere (str | None, optional): Hemisphere to plot (e.g., NORTH,
+            SOUTH), or None. Defaults to None.
+        dark_mode (bool, optional): Use 'dark_background' style.
+            Defaults to False.
+        zorder (int, optional): Base draw order for the footprint artists.
+            Defaults to 4.
+        small_text (bool, optional): Use smaller axis text. Defaults to False.
+        legend_top (bool, optional): Place the legend at the top.
+            Defaults to False.
+        geo_labels (bool, optional): Show geographic coordinate labels in
+            addition to the magnetic ones. Defaults to False.
+        geo_offset (float, optional): Angular offset applied to the
+            geographic label positions. Defaults to 0.0.
+        terminator (bool, optional): Show day/night with Nightshade.
+            Defaults to False.
+        plain (bool, optional): Draw footprints only, without grids, labels,
+            or legend. Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
 
     Returns:
         None
@@ -2246,13 +2475,19 @@ def plot_mag_and_geo_maps(
     """Generate maps showing Earth's magnetic field and geographic coordinates.
 
     Args:
-        nc_data (Dataset): _description_
-        source (Path): _description_
-        save_directory (Path): _description_
-        figure_dpi (int, optional): _description_. Defaults to 300.
-        dark_mode (bool, optional): _description_. Defaults to False.
-        south_inverted (bool, optional): _description_. Defaults to False.
-        overwrite (bool, optional): _description_. Defaults to False.
+        nc_data (Dataset): Open netCDF4 Dataset of the L2 product file to plot.
+        source (Path): Path of the source product file, used for plot naming
+            and metadata.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to 300.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
 
     Returns:
         None
@@ -2293,13 +2528,15 @@ def plot_mag_and_geo_maps(
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
 
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type="MEM & spacecraft footprint (geo+mag)",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
         return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
-
-    logger.info("Generating plot of MEM and spacecraft footprints, geo and mag coords")
 
     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
     mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
@@ -2758,16 +2995,29 @@ def sza_overlay(
     magnetic=False,
     time4mag=None,
 ):
-    """_summary_
+    """
+    Compute a Solar Zenith Angle (SZA) grid and overplot it on the supplied map
+    axes.
+
+    The SZA at each point is the angle between the local surface normal and the
+    vector to the subsolar point, drawn as shaded contours. When magnetic is
+    True, the grid is transformed to APEX geomagnetic coordinates after the
+    dot-product calculation (the transform must be applied after the
+    calculation because the magnetic frame is not simply rotated).
 
     Args:
-        map_axs (_type_): _description_
-        MLT_sign (_type_): _description_
-        sun_lat_rad (_type_): _description_
-        sun_lon_rad (_type_): _description_
-        sun_mlon_deg (_type_, optional): _description_. Defaults to None.
-        magnetic (bool, optional): _description_. Defaults to False.
-        time4mag (_type_, optional): _description_. Defaults to None.
+        map_axs (plt.Axes): Map axes on which to draw the SZA overlay.
+        MLT_sign (int): Sign multiplier (+1 or -1) applied to longitude for
+            the (optional) inverted southern-hemisphere projection.
+        sun_lat_rad (float): Sub-solar latitude in radians.
+        sun_lon_rad (float): Sub-solar longitude in radians.
+        sun_mlon_deg (float, optional): Sub-solar magnetic longitude in
+            degrees, required when magnetic is True. Defaults to None.
+        magnetic (bool, optional): Transform the SZA grid to magnetic
+            coordinates before plotting. Defaults to False.
+        time4mag (datetime.datetime, optional): Time used for the APEX
+            magnetic transform; required when magnetic is True.
+            Defaults to None.
 
     Returns:
         None
@@ -2878,14 +3128,36 @@ def plot_b_1D_maps_with_time(
     help: bool = False,
 ):
     """
-    - Script used to generate AEJ L3 B-up data output for B-down L2 inputs
-    - Based on plot_btot_maps_with_time
-    - All arrays should be 1D!
+    Plot the retrieved 1-D B field maps versus time for L3 products.
+
+    Generates the AEJ L3 B-up data output plots from B-down L2 inputs (based
+    on the plot_btot_maps_with_time approach). All input arrays are expected to
+    be 1-D.
 
     Args:
-        nc_dat (Dataset): Required. L3 file netCDF4 Dataset
-        source (Path): Required. Name of L3 file used as input
-        save_directory (Path) :  Required. Path to plot output root directory
+        nc_data (Dataset): Open netCDF4 Dataset of the L3 file used as input.
+        source (Path): Path of the L3 source file, used for plot naming and
+            metadata.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
+        git_branch (str, optional): Pipeline branch to display (used because
+            L3 products do not yet carry pipeline metadata).
+            Defaults to "Unavailable".
+        git_commit (str, optional): Pipeline commit hash to display (used
+            because L3 products do not yet carry pipeline metadata).
+            Defaults to "Unavailable".
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to 200.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        old_format (bool, optional): Use the legacy plot file naming scheme.
+            Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
+        help (bool, optional): Reserved for future use (currently unused).
+            Defaults to False.
 
     Returns:
         None
@@ -2913,25 +3185,15 @@ def plot_b_1D_maps_with_time(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
-
-    if ftgt.exists():
-        if old_hash == new_hash:
-            if not overwrite:
-                logger.info(
-                    f"File exists, source hash unchanged, skipping: {ftgt.name}"
-                )
-                return
-            else:
-                logger.info(
-                    f"File exists but overwrite flag is set, replacing: "
-                    f"{ftgt.as_posix()}"
-                )
-        else:
-            logger.info(
-                f"Source file hash has changed, updating plot for: {source.name}"
-            )
-    else:
-        logger.info(f"File does not exist, creating: {ftgt.name}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type="L3 retrieved B_d and current",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
+        return
 
     try:
         time_utc = np.array(
@@ -2981,8 +3243,6 @@ def plot_b_1D_maps_with_time(
             f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
         )
         return
-
-    logger.info(f"New or updated source file, generating L3 plot {ftgt.stem}")
 
     # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
     # display projected geodetic coordinates for now, pending addition of magnetic
@@ -3345,13 +3605,16 @@ def ingest_full_day_all_sv(
 
     Returns:
         (tuple):
-        - full_day (dict): A dictionary where keys are variable names (e.g., 'sat_lat',
-          'obs_maglat1') and values are numpy arrays of the aggregated data for all
-          spacecraft and orbits on the given date.
-        - uniq_svid (numpy.ndarray): An array of unique spacecraft identifiers found
-          in the processed files.
-        - uniq_orbs (numpy.ndarray): An array of unique orbit numbers found in the
-          processed files.
+
+            full_day (dict): A dictionary where keys are variable names (e.g.,
+            'sat_lat', 'obs_maglat1') and values are numpy arrays of the aggregated data
+            for all spacecraft and orbits on the given date.
+
+            uniq_svid (numpy.ndarray): An array of unique spacecraft identifiers found
+            in the processed files.
+
+            uniq_orbs (numpy.ndarray): An array of unique orbit numbers found in the
+            processed files.
     """
 
     # Generate dictionary of all locations sampled by the EZIE spacecraft in the course
@@ -3471,22 +3734,37 @@ def plot_retrieved_B_and_J(
     overwrite: bool = False,
 ):
     """
-    Plot the retrieved dB fields for each MEM in two formats, along with their estimated
-    errors. Errors for individual dBs are calculated from the derived covariance values.
+    Plot the retrieved B field (L2) together with the derived current (J)
+    vectors (L3) on a combined map.
+
+    The L3 source file is derived from the L2 source by substituting "l2" for
+    "l3" in the file name. Shows the model and observed B fields and the
+    retrieved currents, with MEM footprints, magnetic reference grids, and MLT
+    labels.
 
     Args:
-        nc2_data (Dataset): _description_
-        nc2_sorc (Path): _description_
-        save_directory (Path): _description_
-        version (str | None, optional): _description_. Defaults to None.
-        mode (str, optional): _description_. Defaults to "Uncorrected".
-        figure_dpi (int, optional): _description_. Defaults to DFLT_RES.
-        dark_mode (bool, optional): _description_. Defaults to False.
-        south_inverted (bool, optional): _description_. Defaults to False.
-        overwrite (bool, optional): _description_. Defaults to False.
+        nc2_data (Dataset): Open netCDF4 Dataset of the L2 product file to
+            plot.
+        nc2_sorc (Path): Path of the L2 source product file, used for plot
+            naming, metadata, and deriving the L3 source path.
+        save_directory (Path): Root directory in which to save the generated
+            plot files.
+        version (str | None, optional): Product version/revision string
+            included in the plot file name. Defaults to None.
+        mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
+            Defaults to "Uncorrected".
+        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+            plots. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+            Defaults to False.
+        south_inverted (bool, optional): Invert the southern hemisphere MLT
+            axis (heliospheric community mapping style). Defaults to False.
+        overwrite (bool, optional): Overwrite existing plot files; otherwise
+            skip. Defaults to False.
 
     Raises:
-        TypeError: _description_
+        TypeError: If the L3 file's time field does not contain
+            datetime.datetime or np.datetime64 objects.
 
     Returns:
         None
@@ -3552,11 +3830,15 @@ def plot_retrieved_B_and_J(
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
 
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=nc2_sorc,
+        ftgt=ftgt,
+        plot_type="retrieved B field dBs",
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
         return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
 
     mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
@@ -3592,7 +3874,6 @@ def plot_retrieved_B_and_J(
 
     # Plot magnetic field reference values and deltas from EZIE OSSE retrieval along
     # EZIE MEM lines of sight.
-    logger.info("Generating plot of retrieved B field dBs")
     nrows, ncols = NUM_MEM + 1, 5
 
     # use = np.full_like(time_utc[:], fill_value=True, dtype=bool)

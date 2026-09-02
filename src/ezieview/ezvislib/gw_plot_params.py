@@ -1,3 +1,12 @@
+"""
+Shared constants for the EZIE science gateway plotting codes.
+
+Defines physical constants, plot sizing/resolution/color parameters, region
+definitions and bounds, spacecraft and MEM identifiers, and data product level
+strings used by both the gateway plotting routines (gw_*.py) and the
+update_*_plots.py scripts.
+"""
+
 import datetime
 
 import cartopy.crs as ccrs
@@ -16,17 +25,17 @@ b is the polar radius.
 
 EARTH_RADIUS_EQUATORIAL = 6378.137
 """
-WGS84 value for equatorial radius of the Earth, in km.  
+WGS84 value for equatorial radius of the Earth, in km.
 """
 
 EARTH_RADIUS_POLAR = 6356.752314245
 """
-WGS84 value for polar radius of the Earth, in km.  
+WGS84 value for polar radius of the Earth, in km.
 """
 # ===== Model/retrieval parameters =======================================================
 REFERENCE_ALTITUDE_KM = 80
 """
-Altitudea in km at which MEM footprints are geolocated
+Altitude in km at which MEM footprints are geolocated
 """
 
 O2_CTR_FREQ_MHZ = 118.750e3
@@ -43,9 +52,9 @@ EZIE_DATE_FORMAT = "%Y%m%d"  # Date format used in EZIE product filenames
 SEC_PER_DAY = 24 * 60 * 60
 
 # ===== Plot generation parameters ====================================================
-DEFAULT_FIG_SIZE = (16, 10)  # Landscsape
-ALTERNATE_FIG_SIZE = (16, 7)  # Short Landscsape
-GLOBAL_FIG_SIZE = (16, 15)  # Short Landscsape
+DEFAULT_FIG_SIZE = (16, 10)  # Landscape
+ALTERNATE_FIG_SIZE = (16, 7)  # Short Landscape
+GLOBAL_FIG_SIZE = (16, 15)  # Short Landscape
 PORTRAIT_FIG_SIZE = (8.5, 11)
 DFLT_RES = 100  # DPI
 HIGH_RES = 300  # DPI, better suited for print, presentations, or "eye plot" charts

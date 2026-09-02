@@ -7,15 +7,14 @@ For each date in the requested range, produces:
 - polar stereographic and Mollweide maps of spacecraft passes and MEM
   observation locations, broken down by orbit.
 
-Example command line--run from repo root, in an activated python venv:
+    Example command line--run from repo root, in an activated python venv:
 
-\b
-view_coverage \
-    -d0 2025-06-20 \
-    -d1 2025-06-22 \
-    -fd '/project/ezie/data/l1' \
-    -fp 'ezie_l1_*.nc4' \
-    -pd "/project/ezie/plots/daily-summary"
+    view_coverage \\
+        -d0 2025-06-20 \\
+        -d1 2025-06-22 \\
+        -fd '/project/ezie/data/l1' \\
+        -fp 'ezie_l1_*.nc4' \\
+        -pd "/project/ezie/plots/daily-summary"
 """
 
 # region imports
@@ -112,25 +111,25 @@ def plot_mlt_sza_coverage(
     one panel per spacecraft and MEM.
 
     Args:
-        obs_date (datetime.datetime): UTC date of the observations being plotted.
-        sc_id (np.ndarray): Spacecraft ID for each observation sample.
-        orbit (np.ndarray): Orbit number for each observation sample.
-        mem_mlat (np.ndarray): Magnetic latitude of each MEM footprint, stacked
+        obs_date: UTC date of the observations being plotted.
+        sc_id: Spacecraft ID for each observation sample.
+        orbit: Orbit number for each observation sample.
+        mem_mlat: Magnetic latitude of each MEM footprint, stacked
             over the 4 MEMs (rows) x samples (cols).
-        mem_MLT (np.ndarray): Magnetic local time of each MEM footprint,
+        mem_MLT: Magnetic local time of each MEM footprint,
             stacked as above.
-        mem_sza (np.ndarray): Solar zenith angle of each MEM footprint,
+        mem_sza: Solar zenith angle of each MEM footprint,
             stacked as above.
-        mem_mode (np.ndarray): Boolean flag (True = EARTHLOOK, False = SKYLOOK)
+        mem_mode: Boolean flag (True = EARTHLOOK, False = SKYLOOK)
             for each MEM, stacked as above.
-        output_dir (Path): Root directory in which to save the generated plot files.
-        regions (list): Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
+        output_dir: Root directory in which to save the generated plot files.
+        regions: Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
             observations and therefore need plots.
-        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+        dark_mode: Generate plots using 'dark mode' format.
             Defaults to False.
-        overwrite (bool, optional): Overwrite existing plot files. If not set,
+        overwrite: Overwrite existing plot files. If not set,
             any existing files will be skipped. Defaults to False.
-        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+        figure_dpi: Resolution (DPI) at which to generate the
             plots. Defaults to DFLT_RES.
     """
 
@@ -403,34 +402,34 @@ def plot_daily_maps(
     Mollweide maps are also generated when EQUATORIAL is included in regions.
 
     Args:
-        obs_date (datetime.datetime): UTC date of the observations being plotted.
-        sc_id (np.ndarray): Spacecraft ID for each observation sample.
-        orbit (np.ndarray): Orbit number for each observation sample.
-        sclat (np.ndarray): Geographic latitude of the spacecraft for each sample.
-        sclon (np.ndarray): Geographic longitude of the spacecraft for each sample.
-        sc_mlat (np.ndarray): Magnetic latitude of the spacecraft for each sample.
-        sc_MLT (np.ndarray): Magnetic local time of the spacecraft for each sample.
-        mem_lat (np.ndarray): Geographic latitude of each MEM footprint, stacked
+        obs_date: UTC date of the observations being plotted.
+        sc_id: Spacecraft ID for each observation sample.
+        orbit: Orbit number for each observation sample.
+        sclat: Geographic latitude of the spacecraft for each sample.
+        sclon: Geographic longitude of the spacecraft for each sample.
+        sc_mlat: Magnetic latitude of the spacecraft for each sample.
+        sc_MLT: Magnetic local time of the spacecraft for each sample.
+        mem_lat: Geographic latitude of each MEM footprint, stacked
             over the 4 MEMs (rows) x samples (cols).
-        mem_lon (np.ndarray): Geographic longitude of each MEM footprint,
+        mem_lon: Geographic longitude of each MEM footprint,
             stacked as above.
-        mem_mlat (np.ndarray): Magnetic latitude of each MEM footprint,
+        mem_mlat: Magnetic latitude of each MEM footprint,
             stacked as above.
-        mem_MLT (np.ndarray): Magnetic local time of each MEM footprint,
+        mem_MLT: Magnetic local time of each MEM footprint,
             stacked as above.
-        mem_mode (np.ndarray): Boolean flag (True = EARTHLOOK, False = SKYLOOK)
+        mem_mode: Boolean flag (True = EARTHLOOK, False = SKYLOOK)
             for each MEM, stacked as above.
-        output_dir (Path): Root directory in which to save the generated plot files.
-        regions (list): Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
+        output_dir: Root directory in which to save the generated plot files.
+        regions: Regions (e.g., NORTH, SOUTH, EQUATORIAL) that had
             observations and therefore need plots.
-        south_inverted (bool, optional): Invert the MLT axis on the southern
+        south_inverted: Invert the MLT axis on the southern
             hemisphere plot (heliospheric community mapping style).
             Defaults to False.
-        overwrite (bool, optional): Overwrite existing plot files. If not set,
+        overwrite: Overwrite existing plot files. If not set,
             any existing files will be skipped. Defaults to False.
-        dark_mode (bool, optional): Generate plots using 'dark mode' format.
+        dark_mode: Generate plots using 'dark mode' format.
             Defaults to False.
-        figure_dpi (int, optional): Resolution (DPI) at which to generate the
+        figure_dpi: Resolution (DPI) at which to generate the
             plots. Defaults to DFLT_RES.
     """
 
@@ -991,36 +990,21 @@ def main(
     """
     Generate a set of EZIE full-day summary plots based on the specified date and
     supplied file types, as determined by the supplied file pattern input. Options to
-    make plots at higher resolution (-dpi/--figure_dpi, default is 100 DPI)
-    and in 'dark mode' are also available.
-
-    Example command line--run from repo root, in an activated python venv:
-
-    \b
-    view_coverage \\
-        -d0 2025-06-20 \\
-        -d1 2025-06-22 \\
-        -fd '/project/ezie/data/l1' \\
-        -fp 'ezie_l1_*.nc4'  \\
-        -pd "/project/ezie/plots/daily-summary"
+    make plots at higher resolution (-dpi/--figure_dpi, default is 100 DPI) and in 'dark
+    mode' are also available.
 
     Args:
-        start_date (datetime.datetime): Start date of entries to be processed.
-        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
-            processed.
-        file_directory (str): Root directory path to be searched for EZIE input
-            files.
-        file_pattern (str): Pattern of file path to be searched for EZIE input
-            files.
-        plots_directory (str): Root directory in which to save generated plot files.
-        overwrite (bool): Overwrite existing files. If not set, any existing files
-            will be skipped.
-        dark_mode (bool): Generate plots using 'dark mode' format.
-        figure_dpi (int): Resolution (DPI) at which to generate the plots.
+        start_date: Start date of entries to be processed.
+        stop_date: Stop date (inclusive) of entries to be processed.
+        file_directory: Root directory path to be searched for EZIE input files.
+        file_pattern: Pattern of file path to be searched for EZIE input files.
+        plots_directory: Root directory in which to save generated plot files.
+        overwrite: Overwrite existing files. If not set, existing files will be skipped.
+        dark_mode: Generate plots using 'dark mode' format.
+        figure_dpi: Resolution (DPI) at which to generate the plots.
 
     Returns:
-        int: 0 on success, 1 if no files were found matching the date
-            specifications.
+        int: 0 on success, 1 if no files were found matching the date specifications.
     """
     # python3 update_coverage_plots.py \\
     # Begin - configure logging, log all supplied arguments

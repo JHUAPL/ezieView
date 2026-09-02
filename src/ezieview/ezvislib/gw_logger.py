@@ -1,3 +1,11 @@
+"""
+Logging setup for the EZIE science gateway plotting codes.
+
+Provides a single helper to configure the root logger for standard scripts or
+Jupyter notebooks, with optional file output, rotation, and expanded message
+formats.
+"""
+
 # region imports
 import datetime
 import logging
@@ -23,28 +31,40 @@ def initialize_logging(
     using_imports: bool = False,
     bare: bool = False,
 ) -> logging.Logger:
-    """_summary_
-    Make logging work for standard python scripts or Jupyter notebooks, with or without
-    an expanded format for logging messages from imported modules.
+    """
+    Configure the root logger for standard python scripts or Jupyter notebooks,
+    with or without an expanded format for logging messages from imported
+    modules.
+
+    The root logger is used (rather than a module-named logger) so that
+    messages from imported modules are visible. Existing handlers are cleared
+    before adding the new one to avoid duplicate output.
 
     Args:
-        log_to_file   (bool, optional): Use file, or stdout? Defaults to False (stdout).
-        log_folder    (str,  optional): Defaults to "./logs".
-        log_level     (int,  optional): Defaults to logging.INFO.
-        rotating      (bool, optional): Use a timed daily rotating log file.
-                                        Default=False
-        timestamp     (bool, optional): Prefix log file name with timestamp.
-                                        Default=True
-        open_console  (bool, optional): Open Console.app w/log file (macOS).
-                                        Default=False
-        jupyter       (bool, optional): Sleeker logging for notebooks. Default=False.
-        using_imports (bool, optional): Modify log format string to include file and
-                                        function name if using imported (local) code.
-                                        Defaults to False.
-        bare          (bool, optional): Message-only logging, like print. Default=False.
+        log_to_file (bool, optional): Log to a file, or stdout?
+            Defaults to False (stdout).
+        log_folder (str, optional): Folder in which to write log files (created
+            if missing). Defaults to "./logs".
+        log_level (int, optional): Logging level for the root logger.
+            Defaults to logging.INFO.
+        rotating (bool, optional): Use a log file that rotates at midnight UTC
+            (one file per day). Defaults to False.
+        timestamp (bool, optional): Prefix the log file name with a timestamp.
+            Defaults to True.
+        open_console (bool, optional): Open the log file in Console.app
+            (macOS only, and only when logging to a file). Defaults to False.
+        jupyter (bool, optional): Use a slimmer format suited to notebooks
+            (omits filename and function name). Defaults to False.
+        multiproc (bool, optional): Use a format that includes thread and
+            process identifiers, for multi-threaded/multi-process use.
+            Defaults to False.
+        using_imports (bool, optional): Include file and function name in the
+            log format, for use with imported (local) code. Defaults to False.
+        bare (bool, optional): Message-only logging, like print.
+            Defaults to False.
 
     Returns:
-        logging.Logger: The tweaked-to-specifications logger we wish to use
+        logging.Logger: The configured root logger.
     """
 
     # Format logging messages to suit application.

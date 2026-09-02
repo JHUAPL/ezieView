@@ -14,15 +14,25 @@ theme:
 
 plugins:
 - search
+- to-pdf:
+    author: The JHUAPL EZIE Team
+    copyright: Copyright @ JHUAPL 2026
+    cover: false
+    output_path: ezieView.pdf
+    toc_level: 5
+    enabled_if_env: ENABLE_PDF_EXPORT
+
 - mkdocstrings:
-    enabled: !ENV [ENABLE_MKDOCSTRINGS, true]
+    enabled: true
+#   !ENV [ENABLE_MKDOCSTRINGS, true]
 #   custom_templates: templates
     default_handler: python
     locale: en
     handlers:
       python:
         options:
-          show_source: true
+          show_source: false
+          # !ENV [ENABLE_PDF_EXPORT, false]
 
 nav:
   - Home: README.md

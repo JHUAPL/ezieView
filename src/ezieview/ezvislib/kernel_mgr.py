@@ -1,3 +1,10 @@
+"""
+Manage the NAIF/SPICE kernel files required for Earth/Sun geometry calculations.
+
+Downloads the SPK, LSK, and PCK kernels into a local cache on first use (so
+that subsequent runs work offline) and returns their paths.
+"""
+
 import logging
 from pathlib import Path
 

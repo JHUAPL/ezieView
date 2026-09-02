@@ -1,3 +1,12 @@
+"""
+Utility methods for the EZIE science gateway plotting codes.
+
+Provides file filtering and product name parsing, time conversion, coordinate
+transformations (geographic to APEX geomagnetic, and longitude inversion),
+cached continent geometries, axis formatting, geomagnetic reference overlays,
+and figure naming/saving helpers shared by the gw_* plotting routines.
+"""
+
 # region imports
 import collections
 import datetime
@@ -171,7 +180,8 @@ def extract_science_passes(nc_data: netCDF4.Dataset):
     into individual science passes based on that algorithm.
 
     Args:
-        nc_data (Dataset, optional): Path to full-day netCDF file. Defaults to None.
+        nc_data (Dataset): Open netCDF4 Dataset of the full-day product to
+            segment.
 
     Returns:
         list of 2-tuples: Bracketing what we believe are "good" observation intervals.
@@ -249,6 +259,22 @@ def jpl_safe_datetime(
 
 
 def parse_ezie_product_name(source: str | Path):
+    """
+    Parse an EZIE product file name into its constituent parts.
+
+    Two naming conventions are supported: per-orbit L1 files (whose names
+    contain an orbit number) and the older daily format. For an unparseable
+    name, all returned fields are set to NaN (a deliberately empty stem is
+    treated as a filter miss rather than an error, and logged at error level
+    for non-empty stems).
+
+    Args:
+        source (str | Path): Path (or file name) of the EZIE product to parse.
+
+    Returns:
+        collections.namedtuple: Parsed product fields - prod, date, time, orbt,
+            spcv, vrsn, rvsn, and dttm (a timezone-aware UTC datetime, or NaN).
+    """
     parsed = None
     if not isinstance(source, Path):
         source_as_path = Path(source)
@@ -325,6 +351,16 @@ def parse_ezie_product_name(source: str | Path):
 
 
 def j2000_to_utc(seconds_since_j2000):
+    """
+    Convert a seconds-since-J2000 value to a timezone-aware UTC datetime.
+
+    Args:
+        seconds_since_j2000: Number of seconds (int or float) elapsed since
+            2000-01-01 00:00:00 UTC (the epoch used by this conversion).
+
+    Returns:
+        datetime.datetime: The equivalent UTC datetime.
+    """
     # Ensure type compatibility
     seconds = float(seconds_since_j2000)
 
@@ -342,7 +378,22 @@ def filter_daily_files_by_version(
     stop_date: datetime.datetime,
 ):
     """
-    Create list of highest version/revision for a given spacecraft and date.
+    Create a list of the highest version/revision full-day file for each
+    spacecraft, filtered to the requested date range.
+
+    Args:
+        file_directory (str): Root directory path to be searched for EZIE
+            input files.
+        file_pattern (str): Pattern of file path to be searched for EZIE input
+            files.
+        start_date (datetime.datetime): Start date (inclusive) of entries to be
+            processed.
+        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
+            processed.
+
+    Returns:
+        list[Path] | None: Sorted list of the highest version/revision files
+            found, or None if no files matched.
     """
     log_mthd = logger.debug
     # log_mthd = logger.info
@@ -404,7 +455,26 @@ def filter_files_by_version(
     remove_near_dupes: bool = False,
 ):
     """
-    Create list of highest version/revision for a given spacecraft and date.
+    Create a list of the highest version/revision file for each spacecraft and
+    observation time, filtered to the requested date range.
+
+    Args:
+        file_directory (str): Root directory path to be searched for EZIE
+            input files.
+        file_pattern (str): Pattern of file path to be searched for EZIE input
+            files.
+        start_date (datetime.datetime): Start date (inclusive) of entries to be
+            processed.
+        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
+            processed.
+        remove_near_dupes (bool, optional): Prune files of the same
+            version/revision with near-identical timestamps (within 60 seconds
+            for per-orbit files, within one day for full-day files), keeping
+            the latest of each cluster. Defaults to False.
+
+    Returns:
+        list[Path] | None: Sorted list of matching files, or None if no files
+            matched.
     """
     log_mthd = logger.debug
     # log_mthd = logger.info
@@ -524,7 +594,19 @@ def get_datetime_from_utc_string(
     indices: tuple | None = None,
 ):
     """
-    Generate a datetime object from the netcdf file UTC time field strings
+    Generate datetime objects from the netCDF file UTC time field strings.
+
+    Args:
+        nc_time_group: netCDF4 group (typically the file's Time group)
+            containing a time_utc variable of ISO-format strings.
+        indices (tuple | None, optional): (Start, stop) index pair selecting a
+            slice of the time field; None uses the whole field.
+            Defaults to None.
+
+    Returns:
+        tuple[np.ndarray, datetime.datetime] | None: A tuple of (the array of
+            parsed UTC datetimes, the first datetime), or None if the time
+            strings could not be parsed.
     """
     if indices is not None:
         logger.debug(f"{indices!s}")
@@ -559,6 +641,16 @@ def get_datetime_from_utc_string(
 
 
 def moving_average(x, w):
+    """
+    Compute a centered moving average (box filter) of a 1-D array.
+
+    Args:
+        x (np.ndarray): Input 1-D array to smooth.
+        w (int): Window length (number of points averaged).
+
+    Returns:
+        np.ndarray: Smoothed array, same length as the input (mode="same").
+    """
     return np.convolve(a=x, v=np.ones(w), mode="same") / w
 
 
@@ -574,6 +666,22 @@ def convert_to_mag(
     Based on fabulously thorough code at https://gis.stackexchange.com/a/291293
 
     TODO: Do we need to determine whether APEX assumes geodetic or geocentric latitude?
+
+    Args:
+        geom: Shapely geometry (Point, LineString, LinearRing, Multi*, or
+            GeometryCollection) in geographic coordinates.
+        year4mag (int): Decimal year for which the APEX magnetic model is
+            evaluated.
+        alt4mag (float, optional): Altitude in km at which the transform is
+            applied. Defaults to REFERENCE_ALTITUDE_KM.
+
+    Returns:
+        Shapely geometry: The input geometry with its coordinates transformed
+            to APEX geomagnetic lat/lon (same type as the input).
+
+    Raises:
+        RuntimeError: If a Polygon geometry is passed (not yet supported).
+        ValueError: If the geometry type is not recognized.
     """
     if geom.is_empty:
         return geom
@@ -672,6 +780,17 @@ def reverse_lon(
     Inverts longitude in a set of geographic coordinates. Used to make cartopy plot the
     southern hemisphere in 'heliospheric' mode, viewing it as if looking down through a
     transparent earth from above the north pole.
+
+    Args:
+        geom: Shapely geometry (Point, LineString, LinearRing, Polygon, Multi*,
+            or GeometryCollection) in geographic coordinates.
+
+    Returns:
+        Shapely geometry: A geometry of the same type with longitude sign
+            inverted (latitudes unchanged).
+
+    Raises:
+        ValueError: If the geometry type is not recognized.
     """
     if geom.is_empty:
         return geom
@@ -731,6 +850,22 @@ def map_inverted_continents(
     color: str = "xkcd:black",
     linewidth: float = 0.5,
 ):
+    """
+    Plot continents with inverted longitudes on the supplied cartopy axes.
+
+    Used to render the southern hemisphere in 'heliospheric' style, as if
+    looking down through a transparent earth from above the north pole. The
+    geometries come from the cached _inverted_continents() result.
+
+    Args:
+        ax (plt.Axes): Cartopy axes on which to plot the continents.
+        zorder (int, optional): Draw order for the coastline artists.
+            Defaults to 3.
+        color (str, optional): Color of the coastline lines.
+            Defaults to "xkcd:black".
+        linewidth (float, optional): Width of the coastline lines.
+            Defaults to 0.5.
+    """
     continents_inv = _inverted_continents()
 
     for geom in continents_inv.geometries():
@@ -749,11 +884,19 @@ def map_inverted_continents(
 @functools.cache
 def _magnetic_continents(year4mag: int, alt4mag=REFERENCE_ALTITUDE_KM):
     """
-    Performs magnetic lat/lon coordinate transformation of continent geometries.
+    Perform magnetic lat/lon coordinate transformation of continent geometries.
+
+    Cached: repeated calls with the same arguments return the stored result.
 
     Args:
-    year4mag (float): [Decimal] year
-    alt4mag (float): Height in km
+        year4mag (int): Decimal year for which the APEX magnetic model is
+            evaluated.
+        alt4mag (float, optional): Altitude in km at which the transform is
+            applied. Defaults to REFERENCE_ALTITUDE_KM.
+
+    Returns:
+        cfeature.ShapelyFeature: Coastline geometries transformed to APEX
+            geomagnetic coordinates.
     """
     logger.info("Performing magnetic lat/lon coordinate transformation of continents")
     bgn = time.perf_counter()
@@ -784,6 +927,33 @@ def map_magnetic_continents(
     zorder: int = 3,
     color: str = "xkcd:black",
 ):
+    """
+    Plot continents in geomagnetic (MLT) coordinates on the supplied cartopy
+    axes.
+
+    The continents come from the cached _magnetic_continents() result
+    (geographic-to-magnetic transform), with magnetic longitude re-expressed
+    as MLT relative to the subsolar magnetic longitude. Dateline wrapping is
+    closed up before plotting.
+
+    Args:
+        ax (plt.Axes): Cartopy axes on which to plot the continents.
+        time4mag (datetime.datetime): Time used for the APEX magnetic
+            coordinate transform.
+        sun_mlon (float): Subsolar magnetic longitude in degrees, used to
+            define the MLT zero point.
+        alt4mag (float): Altitude in km at which the magnetic transform is
+            evaluated.
+        south_inverted (bool, optional): Invert the MLT axis for the southern
+            hemisphere (heliospheric community mapping style).
+            Defaults to False.
+        linewidth (float, optional): Width of the coastline lines.
+            Defaults to 1.0.
+        zorder (int, optional): Draw order for the coastline artists.
+            Defaults to 3.
+        color (str, optional): Color of the coastline lines.
+            Defaults to "xkcd:black".
+    """
 
     # This will return cached results if the arguments are the same as a previous call.
     continents_mag = _magnetic_continents(
@@ -845,7 +1015,14 @@ def overlay_ezie_logo(
     dark_mode: bool = False,
 ):
     """
-    Overlay EZIE logo in top left corner of figure (fig)
+    Overlay the EZIE logo in the top-left corner of a figure.
+
+    A dark-mode variant of the logo is used when dark_mode is True.
+
+    Args:
+        fig (plt.Figure): Figure on which to overlay the logo.
+        dark_mode (bool, optional): Use the light-colored logo suitable for
+            dark backgrounds. Defaults to False.
     """
     # Overlay EZIE logo
     img_name = "ezie_logo_no_bg.png" if not dark_mode else "ezie_logo_light.png"
@@ -871,6 +1048,18 @@ def add_product_metadata(
     """
     Add figure text with source file metadata, dealing with files that have different
     formats for version and revision or even no version or revision designation at all.
+
+    The creation timestamp is read from the product's Metadata group when
+    available, falling back to the file's OS modification time.
+
+    Args:
+        fig (plt.Figure): Figure on which to add the metadata text.
+        nc_data (Dataset): Open netCDF4 Dataset to read the creation time from.
+        source (Path): Path of the source product file (name only is shown).
+        second (bool, optional): Place the text in the second (bottom-center)
+            position instead of the bottom-left. Defaults to False.
+        size (str, optional): Matplotlib font size for the metadata text.
+            Defaults to "small".
     """
     # prsd = parse_ezie_product_name(source)
     # ver_str = f"v{prsd.vrsn}" if str(prsd.vrsn) != "nan" else "TEST"
@@ -918,6 +1107,25 @@ def add_pipeline_metadata(
     git_commit: str | None = None,
     size: str = "small",
 ):
+    """
+    Add pipeline software metadata (git branch and commit hash) as figure text
+    in the bottom-right corner.
+
+    Values are read from the product's Configuration group. When that field is
+    empty or missing (e.g., L3 products that do not yet carry pipeline
+    metadata), the supplied git_branch/git_commit overrides are used instead.
+
+    Args:
+        fig (plt.Figure): Figure on which to add the metadata text.
+        nc_data (Dataset): Open netCDF4 Dataset to read the Configuration
+            group from.
+        git_branch (str | None, optional): Branch name to use when the product
+            does not carry one. Defaults to None.
+        git_commit (str | None, optional): Commit hash to use when the product
+            does not carry one. Defaults to None.
+        size (str, optional): Matplotlib font size for the metadata text.
+            Defaults to "small".
+    """
     EMPTY_FIELD: str = "Empty"
     MISSING_FIELD: str = "Unavailable"
     try:
@@ -956,7 +1164,14 @@ def add_pipeline_metadata(
 
 def set_yaxis_tick_format(axs: plt.Axes, max_ticks=10):
     """
-    Set time format used for x axis on individual orbit plots
+    Set UTC time tick format on the y axis of individual orbit plots.
+
+    Major ticks are placed at one-minute intervals and labeled HH:MM.
+
+    Args:
+        axs (plt.Axes): Axes whose y axis is to be formatted.
+        max_ticks (int, optional): Target maximum number of ticks (currently
+            unused). Defaults to 10.
     """
     axs.yaxis.set_major_locator(mdate.MinuteLocator(interval=1))
     axs.yaxis.set_major_formatter(mdate.DateFormatter("%H:%M"))
@@ -970,6 +1185,21 @@ def set_yaxis_tick_format(axs: plt.Axes, max_ticks=10):
 def set_xaxis_tick_format(
     axs: plt.Axes, max_ticks=10, rotation=0, use_seconds: bool = False
 ):
+    """
+    Set UTC time tick format on the x axis of individual orbit plots.
+
+    Major ticks are labeled HH:MM (or HH:MM:SS when use_seconds is True), with
+    auto minor ticks; labels may optionally be rotated.
+
+    Args:
+        axs (plt.Axes): Axes whose x axis is to be formatted.
+        max_ticks (int, optional): Target maximum number of ticks (reserved for
+            future use). Defaults to 10.
+        rotation (int, optional): Rotation angle in degrees for the tick
+            labels (0 = horizontal). Defaults to 0.
+        use_seconds (bool, optional): Include seconds in the tick labels
+            (HH:MM:SS) instead of HH:MM. Defaults to False.
+    """
     # Set time format used for x axis on individual orbit plots, adjusting as needed for
     # overall duration.
     if use_seconds:
@@ -1003,6 +1233,21 @@ def magnetic_parallel(
     Return geographic latitude and longitude vectors corresponding to a parallel of
     APEX-defined magnetic latitude points, at the specified altitude, for the specified
     year.
+
+    The returned vectors are sorted by geographic longitude to prevent line
+    wrapping on global projections.
+
+    Args:
+        year (int): Decimal year for which the APEX magnetic model is
+            evaluated.
+        mag_lat (float, optional): Magnetic latitude (degrees) of the parallel
+            to compute. Defaults to 0.0.
+        alt (float, optional): Altitude in km at which the parallel is
+            computed. Defaults to REFERENCE_ALTITUDE_KM.
+
+    Returns:
+        tuple(np.ndarray, np.ndarray): Geographic latitude and longitude
+            vectors of the parallel, sorted by longitude.
     """
     res_deg = 1.0  # make keyword?
     mag_lon = np.arange(-180.0, 180.0, res_deg)
@@ -1056,9 +1301,12 @@ def plot_geomagnetic_references(
         latitudes (list[float] | None, optional): Parallel latitudes. Defaults to None.
         south_inverted (bool, optional): Plot southern hemisphere as if looking down
             through earth from above north pole. Defaults to False.
-        lat_clr (str, optional): _description_. Defaults to "black".
-        ls (str, optional): _description_. Defaults to "dashed".
-        lw (int, optional): _description_. Defaults to 1.
+        lat_clr (str, optional): Color of the magnetic latitude parallels (and
+            pole markings). Defaults to "black".
+        ls (str, optional): Line style for the magnetic latitude parallels.
+            Defaults to "dashed".
+        lw (int, optional): Line width for the magnetic latitude parallels.
+            Defaults to 1.
 
     Returns:
         Line2D: The artist corresponding to the overlaid magnetic parallels, e.g., for
@@ -1127,6 +1375,18 @@ def read_png_metadata(filename: Path | str):
 
 
 def hash_ezie_data_product(source: str | Path):
+    """
+    Compute the MD5 hash of a data product file.
+
+    Used by save_close_figure to detect when a source file has changed since a
+    plot was last generated, so stale plots can be regenerated.
+
+    Args:
+        source (str | Path): Path of the data file to hash.
+
+    Returns:
+        str: Hexadecimal MD5 digest of the file contents.
+    """
     import hashlib
 
     with open(source, "rb") as fp:
@@ -1158,6 +1418,39 @@ def save_close_figure(
            orbits per file. NOTE: This may change to a single orbit per file soon!
         3) L2 and L3 plots are generated on a single orbit basis, and all required plot
            naming parameters can be extracted from the source file name.
+
+    Args:
+        plot_type (str): Short identifier of the plot type, used in the file
+            name.
+        obs_date (datetime.datetime): UTC date of the observations, used for
+            the output subdirectory and file name.
+        save_directory (Path): Root directory in which to save the plot file.
+        name_only (bool, optional): If True, compute the file path and return
+            it (with hashes) without saving or closing anything.
+            Defaults to False.
+        source (Path | None, optional): Path of the source data file, used for
+            change detection (MD5 hash) and plot naming. None for daily
+            summary plots. Defaults to None.
+        figure (plt.Figure | None, optional): Figure to save and close.
+            Defaults to None.
+        spacecraft (str | None, optional): Spacecraft identifier (e.g., "A",
+            "B", or "C"). Defaults to None.
+        orbit (int | None, optional): Orbit number (may be a timestamp proxy
+            until actual orbit numbers are available). Defaults to None.
+        tstmp (int | None, optional): Pass start timestamp used in the file
+            name for L0/L1 products. Defaults to None.
+        version (str | None, optional): Product version/revision string
+            included in the file name. Defaults to None.
+        dpi (int, optional): Resolution (DPI) at which to save the figure.
+            Defaults to DFLT_RES.
+        dark_mode (bool, optional): Include "DM" rather than "LM" in the file
+            name when old_format is used. Defaults to False.
+        old_format (bool, optional): Use the legacy file naming scheme.
+            Defaults to False.
+
+    Returns:
+        Path | tuple: The path of the saved figure, or, when name_only is
+            True, a tuple of (path, old source hash, new source hash).
     """
 
     old_hash = None
