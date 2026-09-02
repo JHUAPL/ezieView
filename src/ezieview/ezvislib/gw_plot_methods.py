@@ -2913,13 +2913,25 @@ def plot_b_1D_maps_with_time(
         name_only=True,
     )
     logger.debug(f"Checked file: {ftgt.as_posix()}")
-    logger.info(f"Checked hash for source file: {source.as_posix()}")
 
-    if ftgt.exists() and (old_hash == new_hash) and not overwrite:
-        logger.info(f"File exists, source hash unchanged, skipping: {ftgt.as_posix()}")
-        return
-    if ftgt.exists() and (old_hash != new_hash):
-        logger.info("Source file hash has changed, updating plot")
+    if ftgt.exists():
+        if old_hash == new_hash:
+            if not overwrite:
+                logger.info(
+                    f"File exists, source hash unchanged, skipping: {ftgt.name}"
+                )
+                return
+            else:
+                logger.info(
+                    f"File exists but overwrite flag is set, replacing: "
+                    f"{ftgt.as_posix()}"
+                )
+        else:
+            logger.info(
+                f"Source file hash has changed, updating plot for: {source.name}"
+            )
+    else:
+        logger.info(f"File does not exist, creating: {ftgt.name}")
 
     try:
         time_utc = np.array(
@@ -2950,9 +2962,7 @@ def plot_b_1D_maps_with_time(
         hemisphere = SOUTH
     else:
         hemisphere = None
-        logger.warning(
-            f"L3 file appears to contain EEJ pass, skipping: {source.as_posix()}"
-        )
+        logger.warning(f"L3 file appears to contain EEJ pass, skipping: {source.name}")
         return
 
     # Grab J, B, and coordinate data arrays
@@ -2972,7 +2982,7 @@ def plot_b_1D_maps_with_time(
         )
         return
 
-    logger.info(f"Generating L3 plot {ftgt.stem}")
+    logger.info(f"New or updated source file, generating L3 plot {ftgt.stem}")
 
     # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
     # display projected geodetic coordinates for now, pending addition of magnetic
