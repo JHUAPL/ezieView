@@ -350,27 +350,6 @@ def parse_ezie_product_name(source: str | Path):
     )(**parsed)
 
 
-def j2000_to_utc(seconds_since_j2000):
-    """
-    Convert a seconds-since-J2000 value to a timezone-aware UTC datetime.
-
-    Args:
-        seconds_since_j2000: Number of seconds (int or float) elapsed since
-            2000-01-01 00:00:00 UTC (the epoch used by this conversion).
-
-    Returns:
-        datetime.datetime: The equivalent UTC datetime.
-    """
-    # Ensure type compatibility
-    seconds = float(seconds_since_j2000)
-
-    # J2000 epoch (UTC)
-    j2000_epoch = datetime.datetime(2000, 1, 1, tzinfo=datetime.UTC)
-
-    # Add offset
-    return j2000_epoch + datetime.timedelta(seconds=seconds)
-
-
 def filter_daily_files_by_version(
     file_directory: str,
     file_pattern: str,
