@@ -49,6 +49,7 @@ Thumbs.db
 *.wmv
 
 # Locally generated log and plot outputs directories
+.github/
 site/
 logs/
 outputs/

@@ -1,0 +1,1009 @@
+diff --git a/.gitignore b/.gitignore
+index 9b88d01..f015654 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -49,6 +49,7 @@ Thumbs.db
+ *.wmv
+ 
+ # Locally generated log and plot outputs directories
++.github/
+ site/
+ logs/
+ outputs/
+diff --git a/mkdocs.yml b/mkdocs.yml
+index 0d57363..4bb1a4d 100644
+--- a/mkdocs.yml
++++ b/mkdocs.yml
+@@ -12,20 +12,18 @@ theme:
+     # - navigation.tabs
+     - navigation.sections
+ 
++nav:
++  - Home: README.md
++  - License: LICENSE.md
++  - API Reference: api/index.md
++  # - Getting Started: getting_started.md
++  # - Tutorials: tutorials/index.md
++
+ plugins:
+ - search
+-- to-pdf:
+-    author: The JHUAPL EZIE Team
+-    copyright: Copyright @ JHUAPL 2026
+-    cover: false
+-    output_path: ezieView.pdf
+-    toc_level: 5
+-    enabled_if_env: ENABLE_PDF_EXPORT
+ 
+ - mkdocstrings:
+     enabled: true
+-#   !ENV [ENABLE_MKDOCSTRINGS, true]
+-#   custom_templates: templates
+     default_handler: python
+     locale: en
+     handlers:
+@@ -36,9 +34,10 @@ plugins:
+           show_root_heading: true
+           # !ENV [ENABLE_PDF_EXPORT, false]
+ 
+-nav:
+-  - Home: README.md
+-  - License: LICENSE.md
+-  - API Reference: api/index.md
+-  # - Getting Started: getting_started.md
+-  # - Tutorials: tutorials/index.md
+\ No newline at end of file
++# - to-pdf:
++#     author: The JHUAPL EZIE Team
++#     copyright: Copyright @ JHUAPL 2026
++#     cover: false
++#     output_path: ezieView.pdf
++#     toc_level: 5
++#     enabled_if_env: ENABLE_PDF_EXPORT
+\ No newline at end of file
+diff --git a/proj_build.sh b/proj_build.sh
+new file mode 100755
+index 0000000..64e8206
+--- /dev/null
++++ b/proj_build.sh
+@@ -0,0 +1,5 @@
++#!/usr/bin/env bash
++
++uv build \
++    --system-certs \
++    --index https://pypi.org/simple
+\ No newline at end of file
+diff --git a/proj_venv.sh b/proj_venv.sh
+new file mode 100755
+index 0000000..c08a670
+--- /dev/null
++++ b/proj_venv.sh
+@@ -0,0 +1,53 @@
++#!/usr/bin/env bash
++
++# Install uv if not already on system
++command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
++
++# Update uv itself to the latest stable version
++echo "Updating uv..."
++uv self update
++
++# Create venv if not present
++echo "Checking venv status..."
++[ -d .venv ] || uv venv -p 3.12
++# shellcheck disable=SC1091
++. ./.venv/bin/activate
++
++# Add zensical and ruff to the development dependency group if not already present
++echo "Checking tool installation..."
++has_zensical=$(grep zensical pyproject.toml | cut -d'"' -f 2)
++if [ -z "$has_zensical" ]; then
++    echo "Installing zensical..."
++    uv add --dev zensical
++else
++    echo "Has $has_zensical"
++fi
++
++has_ruff=$(grep "ruff" pyproject.toml | grep -v tool | cut -d'"' -f 2)
++if [ -z "$has_ruff" ]; then
++    echo "Installing ruff..."
++    uv add --dev ruff
++else
++    echo "Has $has_ruff"
++fi
++
++has_mkdocstrings=$(grep "mkdocstrings" pyproject.toml | grep -v tool | cut -d'"' -f 2)
++if [ -z "$has_mkdocstrings" ]; then
++    echo "Installing mkdocstrings..."
++    uv add --dev mkdocstrings
++    uv add --dev "mkdocstrings[python]"
++    uv add --dev mkdocs-material
++    uv add --dev mkdocs-to-pdf
++else
++    echo "Has $has_mkdocstrings"
++fi
++
++# [Re-]Install ezieview
++# Optional env prefix for DMZ systems: UV_CACHE_DIR=/project/ezie/.cache/uv
++uv pip install \
++    --system-certs \
++    --index "https://pypi.org/simple" \
++    -e  .
++
++# Initialize zensical if this has not already been done
++# [ -f zensical.toml ] || zensical new .
+diff --git a/pyproject.toml b/pyproject.toml
+index 3e97c82..144a7ce 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "uv_build"
+ 
+ [project]
+ name = "ezieView"
+-version = "0.1.7"
++version = "0.1.8"
+ authors = [
+   { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
+ ]
+@@ -36,6 +36,22 @@ lint.ignore=[
+ "BLE001",
+ ]
+ 
++[dependency-groups]
++dev = [
++    "mkdocs-material>=9.7.7",
++    "mkdocs-to-pdf>=0.11.2",
++    "mkdocstrings[python]>=1.0.6",
++    "ruff>=0.16.6",
++    "zensical>=0.0.59",
++]
++
++[project.urls]
++Source = "https://bitbucket.org/aplkaiju/ezieview/"
++"Science Gateway" = "https://eziegw.jhuapl.edu"
++
++[[tool.uv.index]]
++url = "https://pypi.org/simple"
++
+ # TODO: transition to "real" pypi.org when ready
+ [[tool.uv.index]]
+ name = "testpypi"
+@@ -58,10 +74,6 @@ classifiers = [
+ license = ["BSD 3-Clause"]
+ license-files = ["LICENSE.md"]
+ 
+-[project.urls]
+-Source = "https://bitbucket.org/aplkaiju/ezieview/"
+-"Science Gateway" = "https://eziegw.jhuapl.edu"
+-
+ # TODO: following still TBD, along with where the actual public repo will be hosted
+ # Documentation = ""  # RTD? GitHub Pages is free for repos on GitHub.
+ # Homepage = ""
+diff --git a/src/ezieview/ezvislib/gw_plot_methods.py b/src/ezieview/ezvislib/gw_plot_methods.py
+index d815e78..38cd1ab 100644
+--- a/src/ezieview/ezvislib/gw_plot_methods.py
++++ b/src/ezieview/ezvislib/gw_plot_methods.py
+@@ -2,15 +2,6 @@
+ A collection of methods for generating plots from EZIE data products, primarily for use
+ on the science gateway. A few methods are also used for various spacecraft attitude
+ and/or data analyses, e.g., the star tracker loss of lock investigation.
+-
+-TODO: Refactor the various mapping methods used by multiple types of plot generation
+-routines, both geodetic and magnetic, into a single set of modular methods (rather than
+-the organic mess that grew out of shifting requirements over the last two years). Once
+-that is done, the methods specific to a single type of plot should probably be moved to
+-their respective update_*_plots.py files in their presumably slimmed down new forms.
+-This file should contain only the methods common to all, and the gw_*.py routines are
+-already used by both the gateway plotting codes and various analysis codes, e.g., for
+-sci-ops investigations (star tracker loss of lock, etc.).
+ """
+ 
+ # region imports
+@@ -105,23 +96,11 @@ PLT_NDX = [
+ ]  # Positions of MEM[n] in stack of plots (top to bottom, ordered by angle WRT nadir)
+ SCIENCE: int = 2
+ NCDF_MISSING = default_fillvals["f4"]
++# Offset slightly from 90 because some mapping-related package has begun throwing errors
++# when 90 is used following recent updates.
++POLE_LAT = 89.0
+ # endregion
+ 
+-# rc_fonts = {
+-#     "text.usetex": True,
+-#     # "text.latex.preview": True,
+-#     "font.size": 20,
+-#     "axes.titlesize": 22,
+-#     "axes.labelsize": 22,
+-#     "legend.fontsize": 20,
+-#     "xtick.labelsize": 20,
+-#     "ytick.labelsize": 20,
+-#     "figure.titlesize": 22,
+-#     "mathtext.default": "regular",
+-#     # "text.latex.preamble": [r"""\usepackage{bm}"""],
+-# }
+-# mpl.rcParams.update(rc_fonts)
+-
+ 
+ def plot_update_required(
+     source: Path,
+@@ -151,6 +130,47 @@ def plot_update_required(
+     return True
+ 
+ 
++def clip_to_circle(
++    map_axs: GeoAxes,
++    proj_method: ccrs.Projection,
++    hemisphere: str,
++):
++    """_summary_
++
++    Args:
++        map_axs (GeoAxes): cartopy axes that we wish to modify
++        proj_method ():
++        hemisphere (str): NORTH or SOUTH for this polar projection tweak
++    """
++    x_0, y_0 = proj_method.transform_point(
++        0,
++        +POLE_LAT if hemisphere == NORTH else -POLE_LAT,
++        src_crs=DATA_TRANSFORM,
++    )
++    x_1, y_1 = proj_method.transform_point(
++        45,
++        MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
++        src_crs=DATA_TRANSFORM,
++    )
++    map_meters: float = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
++    map_axs.set_extent(
++        (
++            -map_meters,
++            +map_meters,
++            -map_meters,
++            +map_meters,
++        ),
++        crs=proj_method,
++    )
++    # Compute a circle in axes coordinates that will be used as a clipping boundary for
++    # the map.
++    theta = np.linspace(0, 2 * np.pi, 100)
++    center, radius = [0.5, 0.5], 0.5
++    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
++    circle = mpath.Path(verts * radius + center)
++    map_axs.set_boundary(circle, transform=map_axs.transAxes)
++
++
+ def coverage_plot_polar_layout(
+     observation_date: datetime.datetime,
+     hemisphere: str,
+@@ -217,33 +237,9 @@ def coverage_plot_polar_layout(
+         # ty:ignore[invalid-assignment]
+ 
+         if hemisphere is not None:
+-            x_0, y_0 = proj_method.transform_point(
+-                0,
+-                90 if hemisphere == NORTH else -90,
+-                src_crs=DATA_TRANSFORM,
++            clip_to_circle(
++                map_axs=map_axs, proj_method=proj_method, hemisphere=hemisphere
+             )
+-            x_1, y_1 = proj_method.transform_point(
+-                45,
+-                MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-                src_crs=DATA_TRANSFORM,
+-            )
+-            map_meters: float = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-            map_axs.set_extent(
+-                (
+-                    -map_meters,
+-                    +map_meters,
+-                    -map_meters,
+-                    +map_meters,
+-                ),
+-                crs=proj_method,
+-            )
+-            # Compute a circle in axes coordinates that will be used as a clipping
+-            # boundary for the map.
+-            theta = np.linspace(0, 2 * np.pi, 100)
+-            center, radius = [0.5, 0.5], 0.5
+-            verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-            circle = mpath.Path(verts * radius + center)
+-            map_axs.set_boundary(circle, transform=map_axs.transAxes)
+ 
+         lon_delta = 30.0
+         gl = map_axs.gridlines(
+@@ -295,34 +291,7 @@ def coverage_plot_polar_layout(
+                 )
+             )
+ 
+-        x_0, y_0 = proj_method.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method.transform_point(
+-            45,
+-            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        map_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method,
+-        )
+-
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        map_axs.set_boundary(circle, transform=map_axs.transAxes)
++        clip_to_circle(map_axs=map_axs, proj_method=proj_method, hemisphere=hemisphere)
+ 
+         # Set axes title and save axes object in dictionary for use below
+         map_axs.set_title(f"{spcrft} - {hemisphere}", loc="left", pad=12)
+@@ -418,34 +387,8 @@ def coverage_plot_stereographic_layout(
+                     zorder=2,
+                 )
+             )
+-        x_0, y_0 = proj_method.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method.transform_point(
+-            45,
+-            lat_lower_limit if hemisphere == NORTH else -lat_lower_limit,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        map_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method,
+-        )
+ 
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        map_axs.set_boundary(circle, transform=map_axs.transAxes)
++        clip_to_circle(map_axs=map_axs, proj_method=proj_method, hemisphere=hemisphere)
+ 
+         if show_mag_lat:
+             # Add _first_ legend, indicating latitude coordinate types
+@@ -1501,9 +1444,9 @@ def plot_retrieved_b_fields(
+         else:
+             fig_title = "Retrieved Magnetic Field Deltas: "
+             y_label = (
+-                "Retrieved Current-Induced "
++                f"Retrieved Current-Induced "
+                 f"B$_\\mathbf{{{REFERENCE_ALTITUDE_KM}\\ km}}$"
+-                " Field Vectors (nT)"
++                f" Field Vectors (nT)"
+             )
+         fig_title = fig_title + (
+             f"{sc_id} - Orbit {orb_num}\n"
+@@ -1549,7 +1492,7 @@ def plot_retrieved_bd_only(
+     source: Path,
+     save_directory: Path,
+     version: str | None = None,
+-    mode: str = "Uncorrected",
++    # mode: str = "Uncorrected",
+     figure_dpi: int = DFLT_RES,
+     dark_mode: bool = False,
+     south_inverted: bool = False,
+@@ -1567,8 +1510,6 @@ def plot_retrieved_bd_only(
+             plot files.
+         version (str | None, optional): Product version/revision string
+             included in the plot file name. Defaults to None.
+-        mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
+-            Defaults to "Uncorrected".
+         figure_dpi (int, optional): Resolution (DPI) at which to generate the
+             plots. Defaults to DFLT_RES.
+         dark_mode (bool, optional): Generate plots using 'dark mode' format.
+@@ -1581,6 +1522,9 @@ def plot_retrieved_bd_only(
+     Returns:
+         None
+     """
++    # Deprecated option, will be removed
++    # mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
++    #     Defaults to "Uncorrected".
+     if dark_mode:
+         plt.style.use("dark_background")
+         plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+@@ -1653,7 +1597,22 @@ def plot_retrieved_bd_only(
+     ):
+         return
+ 
+-    mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
++    rtrvgrp = nc_data.groups["RetrievedParameters"]
++    if "observation_valid" in rtrvgrp.variables:  # NEW format
++        # TODO: Need to support dbmag or dbdown?
++        mem_dbd_val = [f"RetrievedParameters/debiased_dbmag{mm}" for mm in MEM_NUMBERS]
++        mem_bdd_cov = [
++            f"RetrievedParameters/retrieved_dbmag_error{mm}" for mm in MEM_NUMBERS
++        ]
++        mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
++    else:
++        mem_dbd_val = [
++            f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS
++        ]
++        mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
++        mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
++        mem_cdd = np.sqrt(mem_cdd)  # Covariance is in nc4 files, not error
++
+     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
+     mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
+     mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
+@@ -1663,7 +1622,6 @@ def plot_retrieved_bd_only(
+     # 4 separate variable names.
+     # FIXME - kludge to use old L2 file - comment out line below
+     mem_dbd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbd_val],))
+-    mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
+     mag_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_lat],))
+     mag_ltm = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_LTm],))
+     obs_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lat],))
+@@ -1745,10 +1703,13 @@ def plot_retrieved_bd_only(
+         mem_axs.errorbar(
+             time_utc[use_obs],
+             mem_dbd[mem_ndx][use_obs],
+-            yerr=np.sqrt(mem_cdd[mem_ndx][use_obs]),
++            yerr=mem_cdd[mem_ndx][use_obs],
+             color=MEM_CLR[mem_ndx],
++            ecolor="purple",
+             linestyle="solid",
+-            errorevery=5,
++            errorevery=3,
++            capsize=2.0,
++            barsabove=True,
+         )
+         mem_axs.plot(
+             time_utc[use_obs],
+@@ -1761,11 +1722,11 @@ def plot_retrieved_bd_only(
+         try:
+             b_rng[0] = np.nanmin(
+                 list(b_rng[0:1])
+-                + list(mem_dbd[mem_ndx][use_obs] - np.sqrt(mem_cdd[mem_ndx][use_obs]))
++                + list(mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs])
+             )
+             b_rng[1] = np.nanmax(
+                 list(b_rng[1:2])
+-                + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
++                + list(mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs])
+             )
+         except Exception as exc:
+             mem_axs.set_ylim((-1.0, +1.0))
+@@ -1871,33 +1832,7 @@ def plot_retrieved_bd_only(
+     )  # ty:ignore[invalid-assignment]
+ 
+     if hemisphere is not None:
+-        x_0, y_0 = proj_method.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method.transform_point(
+-            45,
+-            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        map_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method,
+-        )
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        map_axs.set_boundary(circle, transform=map_axs.transAxes)
++        clip_to_circle(map_axs=map_axs, proj_method=proj_method, hemisphere=hemisphere)
+ 
+     # Map S/C and MEM footprint lat/lon
+     dtlim = [time_utc[0], time_utc[1]]
+@@ -2753,34 +2688,9 @@ def plot_mag_and_geo_maps(
+     )  # ty:ignore[invalid-assignment]
+ 
+     if hemisphere is not None:
+-        x_0, y_0 = proj_method_geo.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method_geo.transform_point(
+-            45,
+-            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-            src_crs=DATA_TRANSFORM,
++        clip_to_circle(
++            map_axs=geo_axs, proj_method=proj_method_geo, hemisphere=hemisphere
+         )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        geo_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method_geo,
+-        )
+-
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        geo_axs.set_boundary(circle, transform=geo_axs.transAxes)
+ 
+         logger.info("Mapping continents in reversed longitude coordinates")
+         if south_inverted:
+@@ -2865,43 +2775,9 @@ def plot_mag_and_geo_maps(
+     # )
+ 
+     if hemisphere is not None:
+-        # if (hemisphere == NORTH) or south_inverted:
+-        #     mag_axs.set_extent(
+-        #         extents=[-180, 180, MAG_LAT_LOWER_LIMIT, +90], crs=DATA_TRANSFORM
+-        #     )
+-        # else:
+-        #     mag_axs.set_extent(
+-        #         extents=[-180, 180, -90, -MAG_LAT_LOWER_LIMIT], crs=DATA_TRANSFORM
+-        #     )
+-
+-        x_0, y_0 = proj_method_mag.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method_mag.transform_point(
+-            45,
+-            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-            src_crs=DATA_TRANSFORM,
++        clip_to_circle(
++            map_axs=mag_axs, proj_method=proj_method_mag, hemisphere=hemisphere
+         )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        mag_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method_mag,
+-        )
+-
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        mag_axs.set_boundary(circle, transform=mag_axs.transAxes)
+ 
+     # Transform continent outlines from geographic to APEX magnetic coordinates
+     if hemisphere is not None:
+@@ -3165,7 +3041,6 @@ def plot_b_1D_maps_with_time(
+ 
+     start = time.perf_counter()
+     prsd = parse_ezie_product_name(source=source)
+-    # plot_type = "l3-l2_alt"
+     plot_type: str = "l3-l2"
+ 
+     # See if this figure already exists.
+@@ -3235,7 +3110,13 @@ def plot_b_1D_maps_with_time(
+     Jn = nc_data["/l3_data/Jn_110"][:]
+     lats = nc_data["/l2_data/lat"][:]
+     lons = nc_data["/l2_data/lon"][:]
+-    obs_B = nc_data["/l2_data/Bd_geod_80"][:]
++    l2grp = nc_data.groups["l2_data"]
++    if "Bd_geod_80" in l2grp.variables:  # NEW format
++        obs_B = nc_data["/l2_data/Bd_geod_80"][:]
++        algorithm = "down"
++    elif "Bmag_80" in l2grp.variables:  # NEW format
++        obs_B = nc_data["/l2_data/Bmag_80"][:]
++        algorithm = "mag"
+     model_B = model_B.reshape(lat_mesh.shape)
+ 
+     if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
+@@ -3519,7 +3400,7 @@ def plot_b_1D_maps_with_time(
+     divider = make_axes_locatable(map_axs)
+     cax = divider.append_axes("right", size="3%", pad=0.7, axes_class=maxes.Axes)
+     cbar = fig.colorbar(sc, cax=cax)
+-    cbar.set_label("B$_{{down}}$ [nT]")
++    cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
+     fig.suptitle(
+         (
+             f"L3 and L2: EZIE-{prsd.spcv.upper()} \n"
+@@ -3727,7 +3608,7 @@ def plot_retrieved_B_and_J(
+     nc2_sorc: Path,
+     save_directory: Path,
+     version: str | None = None,
+-    mode: str = "Uncorrected",
++    # mode: str = "Uncorrected",
+     figure_dpi: int = DFLT_RES,
+     dark_mode: bool = False,
+     south_inverted: bool = False,
+@@ -3751,8 +3632,6 @@ def plot_retrieved_B_and_J(
+             plot files.
+         version (str | None, optional): Product version/revision string
+             included in the plot file name. Defaults to None.
+-        mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
+-            Defaults to "Uncorrected".
+         figure_dpi (int, optional): Resolution (DPI) at which to generate the
+             plots. Defaults to DFLT_RES.
+         dark_mode (bool, optional): Generate plots using 'dark mode' format.
+@@ -3769,6 +3648,9 @@ def plot_retrieved_B_and_J(
+     Returns:
+         None
+     """
++    # Deprecated option, will be removed
++    # mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
++    #     Defaults to "Uncorrected".
+ 
+     nc3_sorc: Path = Path(nc2_sorc.as_posix().replace("l2", "l3"))
+     if not nc3_sorc.exists():
+@@ -3797,6 +3679,8 @@ def plot_retrieved_B_and_J(
+     t_stamp = time_utc[0].strftime("%H%M%S")
+     orb_num = nc2_data["Science/orbit_number"][0]
+     sc_id = nc2_data["Metadata/SpaceVehicle"][0]
++    # This field _should_ be constant but do the following for robustness?
++    reference_altitude_km = np.nanmedian(nc2_data["Geolocation/reference_altitude"])
+ 
+     if orb_num == "" or sc_id == "":
+         logger.warning(
+@@ -3840,7 +3724,22 @@ def plot_retrieved_B_and_J(
+     ):
+         return
+ 
+-    mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
++    rtrvgrp = nc2_data.groups["RetrievedParameters"]
++    if "observation_valid" in rtrvgrp.variables:  # NEW format
++        # TODO: Need to support dbmag or dbdown?
++        mem_dbd_val = [f"RetrievedParameters/debiased_dbmag{mm}" for mm in MEM_NUMBERS]
++        mem_bdd_cov = [
++            f"RetrievedParameters/retrieved_dbmag_error{mm}" for mm in MEM_NUMBERS
++        ]
++        mem_cdd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
++    else:
++        mem_dbd_val = [
++            f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS
++        ]
++        mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
++        mem_cdd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
++        mem_cdd = np.sqrt(mem_cdd)  # Covariance is in nc4 files, not error
++
+     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
+     mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
+     mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
+@@ -3850,7 +3749,6 @@ def plot_retrieved_B_and_J(
+     # 4 separate variable names.
+     # FIXME - kludge to use old L2 file - comment out line below
+     mem_dbd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_dbd_val],))
+-    mem_cdd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
+     mag_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_lat],))
+     mag_ltm = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_LTm],))
+     obs_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_obs_lat],))
+@@ -3933,10 +3831,13 @@ def plot_retrieved_B_and_J(
+         mem_axs.errorbar(
+             time_utc[use_obs],
+             mem_dbd[mem_ndx][use_obs],
+-            yerr=np.sqrt(mem_cdd[mem_ndx][use_obs]),
++            yerr=mem_cdd[mem_ndx][use_obs],
+             color=MEM_CLR[mem_ndx],
++            ecolor="purple",
+             linestyle="solid",
+-            errorevery=5,
++            errorevery=3,
++            capsize=2.0,
++            barsabove=True,
+         )
+         mem_axs.plot(
+             time_utc[use_obs],
+@@ -3949,11 +3850,11 @@ def plot_retrieved_B_and_J(
+         try:
+             b_rng[0] = np.nanmin(
+                 list(b_rng[0:1])
+-                + list(mem_dbd[mem_ndx][use_obs] - np.sqrt(mem_cdd[mem_ndx][use_obs]))
++                + list(mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs])
+             )
+             b_rng[1] = np.nanmax(
+                 list(b_rng[1:2])
+-                + list(mem_dbd[mem_ndx][use_obs] + np.sqrt(mem_cdd[mem_ndx][use_obs]))
++                + list(mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs])
+             )
+         except Exception as exc:
+             mem_axs.set_ylim((-1.0, +1.0))
+@@ -3983,8 +3884,8 @@ def plot_retrieved_B_and_J(
+         if row == 0:
+             mem_axs.set_title(
+                 (
+-                    "Retrieved Current-Induced "
+-                    f"B$_\\mathbf{{{REFERENCE_ALTITUDE_KM}\\ km}}$"
++                    "Retrieved Magnetic Field Magnitude Perturbation (nT)"
++                    f"B$_\\mathbf{{{reference_altitude_km}\\ km}}$"
+                     " Field Vectors (nT)"
+                 ),
+                 weight="bold",
+@@ -4059,33 +3960,9 @@ def plot_retrieved_B_and_J(
+     )  # ty:ignore[invalid-assignment]
+ 
+     if hemisphere is not None:
+-        x_0, y_0 = proj_method.transform_point(
+-            0,
+-            90 if hemisphere == NORTH else -90,
+-            src_crs=DATA_TRANSFORM,
+-        )
+-        x_1, y_1 = proj_method.transform_point(
+-            45,
+-            MAG_LAT_LOWER_LIMIT if hemisphere == NORTH else -MAG_LAT_LOWER_LIMIT,
+-            src_crs=DATA_TRANSFORM,
++        clip_to_circle(
++            map_axs=fp_map_axs, proj_method=proj_method, hemisphere=hemisphere
+         )
+-        map_meters = np.sqrt((x_1 - x_0) ** 2 + (y_1 - y_0) ** 2)
+-        fp_map_axs.set_extent(
+-            (
+-                -map_meters,
+-                +map_meters,
+-                -map_meters,
+-                +map_meters,
+-            ),
+-            crs=proj_method,
+-        )
+-        # Compute a circle in axes coordinates that will be used as a clipping boundary
+-        # for the map.
+-        theta = np.linspace(0, 2 * np.pi, 100)
+-        center, radius = [0.5, 0.5], 0.5
+-        verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+-        circle = mpath.Path(verts * radius + center)
+-        fp_map_axs.set_boundary(circle, transform=fp_map_axs.transAxes)
+ 
+     # Map S/C and MEM footprint lat/lon
+     dtlim = [time_utc[0], time_utc[1]]
+@@ -4112,7 +3989,7 @@ def plot_retrieved_B_and_J(
+     _sun_mlat, sun_mlon = apex.geo2apex(
+         sun_geo_lat_deg,
+         sun_geo_lon_deg,
+-        REFERENCE_ALTITUDE_KM,
++        reference_altitude_km,
+     )
+ 
+     # Compute satellite footprint in APEX magnetic coordinates
+@@ -4143,7 +4020,7 @@ def plot_retrieved_B_and_J(
+             ax=fp_map_axs,
+             time4mag=midpoint,
+             sun_mlon=sun_mlon[len(sun_mlon) // 2],
+-            alt4mag=REFERENCE_ALTITUDE_KM,
++            alt4mag=reference_altitude_km,
+             south_inverted=(south_inverted and (hemisphere == SOUTH)),
+             color="xkcd:black" if not dark_mode else DARK_MODE_GRID_COLOR,
+         )
+@@ -4243,7 +4120,13 @@ def plot_retrieved_B_and_J(
+         Jn = nc3_data["/l3_data/Jn_110"][:]
+         lats = nc3_data["/l2_data/lat"][:]
+         lons = nc3_data["/l2_data/lon"][:]
+-        obs_B = nc3_data["/l2_data/Bd_geod_80"][:]
++        l2grp = nc3_data.groups["l2_data"]
++        if "Bd_geod_80" in l2grp.variables:  # NEW format
++            obs_B = nc3_data["/l2_data/Bd_geod_80"][:]
++            algorithm = "down"
++        elif "Bmag_80" in l2grp.variables:  # NEW format
++            obs_B = nc3_data["/l2_data/Bmag_80"][:]
++            algorithm = "mag"
+         model_B = model_B.reshape(lat_mesh.shape)
+ 
+     if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
+@@ -4283,7 +4166,7 @@ def plot_retrieved_B_and_J(
+     # _sun_mag_lat_mid, _sun_mag_lon_mid = apex.geo2apex(
+     #     sun_geo_lat_mid,
+     #     sun_geo_lon_mid,
+-    #     REFERENCE_ALTITUDE_KM,
++    #     reference_altitude_km,
+     # )
+ 
+     # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
+@@ -4555,7 +4438,7 @@ def plot_retrieved_B_and_J(
+     divider = make_axes_locatable(l3_map_axs)
+     cax = divider.append_axes("right", size="3%", pad=0.7, axes_class=maxes.Axes)
+     cbar = fig.colorbar(sc, cax=cax)
+-    cbar.set_label("B$_{{down}}$ [nT]")
++    cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
+     # fig.suptitle(
+     #     (
+     #         f"L3 and L2: EZIE-{prsd.spcv.upper()} \n"
+@@ -4569,16 +4452,24 @@ def plot_retrieved_B_and_J(
+     # )
+ 
+     if hemisphere is not None:
+-        subtitle = """
+-            Currents are plotted above in Geodetic/WGS84 coordinates (solid grid).
+-            Labels indicate Local Time (LT). Magnetic latitude (dashed grid) is also
+-            shown. MEM footprints are plotted below in Apex Geomagnetic coordinates.
++        subtitle = f"""
++            Currents (black arrows) are plotted above in Geodetic/WGS84 coordinates
++            (solid grid). Labels indicate Local Time (LT). Magnetic latitude (dashed
++            grid) is also shown. MEM footprints are plotted below in Apex Geomagnetic
++            coordinates.
++
++            The MEM dB data cadence at left is 2 seconds. The black line is the running
++            average of {AVERAGING_WINDOW} samples.
+             """
+     else:
+-        subtitle = """
+-            Current plot is in Geodetic/WGS84 coordinates (solid grid). Magnetic
+-            latitude (dashed grid) and drift equator (thick solid line) are also
+-            shown. MEM footprints are plotted below in Apex Geomagnetic coordinates.
++        subtitle = f"""
++            Currents (black arrows) are plotted in Geodetic/WGS84 coordinates (solid
++            grid). Magnetic latitude (dashed grid) and drift equator (thick solid line)
++            are also shown. MEM footprints are plotted below in Apex Geomagnetic
++            coordinates.
++
++            The MEM dB data cadence at left is 2 seconds. The black line is the running
++            average of {AVERAGING_WINDOW} samples.
+             """
+     fig.text(
+         0.71,
+@@ -4592,7 +4483,7 @@ def plot_retrieved_B_and_J(
+     )
+ 
+     # Tweak position and add any figure-level annotation
+-    fig_title = f"{mode} Retrieved Magnetic Field Deltas and Currents: "
++    fig_title = "Magnetic Field Perturbations and Currents: "
+     fig_title = fig_title + (
+         f"{sc_id} - Orbit {orb_num}\n"
+         f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
+diff --git a/zensical.toml b/zensical.toml
+new file mode 100644
+index 0000000..9a55d43
+--- /dev/null
++++ b/zensical.toml
+@@ -0,0 +1,128 @@
++[project]
++site_url = "https://ezieview.github.io"
++repo_url = "https://bitbucket.org/aplkaiju/ezieview.git"
++repo_name = "aplkaiju/ezieview"
++# edit_uri = "edit/main/docs/"
++
++site_name = "ezieView"
++site_description = "Visualization Tools For EZIE Data Products"
++site_author = "The JHUAPL EZIE Team"
++copyright = "Copyright &copy; 2026 JHUAPL "
++
++nav = [
++  { "Home" = "README.md" },
++  { "License" = "LICENSE.md" },
++  { "API Reference" = "api/index.md" },
++]
++
++[project.plugins.mkdocstrings]
++enabled = true
++default_handler = "python"
++locale = "en"
++
++[project.plugins.mkdocstrings.handlers.python.options]
++docstring_style = "google"
++show_source =  false
++show_root_heading =  true
++
++# extra_css = ["stylesheets/extra.css"]
++# extra_javascript = ["javascripts/extra.js"]
++
++[project.theme]
++# variant = "classic"
++# custom_dir = "overrides"
++# favicon = "images/favicon.png"
++language = "en"
++features = [
++  "announce.dismiss",
++  # "content.action.edit",
++  # "content.action.view",
++  "content.code.annotate",
++  "content.code.copy",
++  "content.code.select",
++  "content.footnote.tooltips",
++  "content.tabs.link",
++  "content.tooltips",
++  # "header.autohide",
++  # "navigation.expand",
++  "navigation.footer",
++  "navigation.indexes",
++  "navigation.instant",
++  "navigation.instant.prefetch",
++  # "navigation.instant.progress",
++  "navigation.path",
++  # "navigation.prune",
++  "navigation.sections",
++  # "navigation.tabs",
++  # "navigation.tabs.sticky",
++  "navigation.top",
++  "navigation.tracking",
++  "search.highlight",
++  # "toc.follow",
++  # "toc.integrate",
++]
++
++# logo = "assets/logo.png"
++
++# [project.theme.icon]
++# logo = "lucide/smile"
++
++# [project.theme.font]
++# text = "Inter"
++# code = "Jetbrains Mono"
++
++[[project.theme.palette]]
++media = "(prefers-color-scheme)"
++toggle.icon = "lucide/sun-moon"
++toggle.name = "Switch to light mode"
++
++[[project.theme.palette]]
++media = "(prefers-color-scheme: light)"
++scheme = "default"
++toggle.icon = "lucide/sun"
++toggle.name = "Switch to dark mode"
++
++[[project.theme.palette]]
++media = "(prefers-color-scheme: dark)"
++scheme = "slate"
++toggle.icon = "lucide/moon"
++toggle.name = "Switch to system preference"
++
++# [[project.extra.social]]
++# icon = "fontawesome/brands/github"
++# link = "https://github.com/user/repo"
++
++# [[project.extra.social]]
++# icon = "fontawesome/brands/mastodon"
++# link = "https://fosstodon.org/@user"
++
++[project.markdown_extensions]
++abbr = {}
++admonition = {}
++attr_list = {}
++def_list = {}
++footnotes = {}
++md_in_html = {}
++toc.permalink = true
++pymdownx.arithmatex.generic = true
++pymdownx.betterem = {}
++pymdownx.caret = {}
++pymdownx.details = {}
++pymdownx.emoji.emoji_generator = "zensical.extensions.emoji.to_svg"
++pymdownx.emoji.emoji_index = "zensical.extensions.emoji.twemoji"
++pymdownx.highlight.anchor_linenums = true
++pymdownx.highlight.line_spans = "__span"
++pymdownx.highlight.pygments_lang_class = true
++pymdownx.inlinehilite = {}
++pymdownx.keys = {}
++pymdownx.magiclink = {}
++pymdownx.mark = {}
++pymdownx.smartsymbols = {}
++# pymdownx.snippets.base_path = "includes"
++pymdownx.superfences.custom_fences = [
++  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
++]
++pymdownx.tabbed.alternate_style = true
++pymdownx.tabbed.combine_header_slug = true
++pymdownx.tasklist.custom_checkbox = true
++pymdownx.tilde = {}

@@ -12,20 +12,18 @@ theme:
     # - navigation.tabs
     - navigation.sections
 
+nav:
+  - Home: README.md
+  - License: LICENSE.md
+  - API Reference: api/index.md
+  # - Getting Started: getting_started.md
+  # - Tutorials: tutorials/index.md
+
 plugins:
 - search
-- to-pdf:
-    author: The JHUAPL EZIE Team
-    copyright: Copyright @ JHUAPL 2026
-    cover: false
-    output_path: ezieView.pdf
-    toc_level: 5
-    enabled_if_env: ENABLE_PDF_EXPORT
 
 - mkdocstrings:
     enabled: true
-#   !ENV [ENABLE_MKDOCSTRINGS, true]
-#   custom_templates: templates
     default_handler: python
     locale: en
     handlers:
@@ -36,9 +34,10 @@ plugins:
           show_root_heading: true
           # !ENV [ENABLE_PDF_EXPORT, false]
 
-nav:
-  - Home: README.md
-  - License: LICENSE.md
-  - API Reference: api/index.md
-  # - Getting Started: getting_started.md
-  # - Tutorials: tutorials/index.md
+# - to-pdf:
+#     author: The JHUAPL EZIE Team
+#     copyright: Copyright @ JHUAPL 2026
+#     cover: false
+#     output_path: ezieView.pdf
+#     toc_level: 5
+#     enabled_if_env: ENABLE_PDF_EXPORT

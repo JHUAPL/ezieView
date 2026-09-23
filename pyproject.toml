@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "ezieView"
-version = "0.1.7"
+version = "0.1.8"
 authors = [
   { name = "EZIE Support", email = "ezie-support@jhuapl.edu" },
 ]
@@ -36,6 +36,22 @@ lint.ignore=[
 "BLE001",
 ]
 
+[dependency-groups]
+dev = [
+    "mkdocs-material>=9.7.7",
+    "mkdocs-to-pdf>=0.11.2",
+    "mkdocstrings[python]>=1.0.6",
+    "ruff>=0.16.6",
+    "zensical>=0.0.59",
+]
+
+[project.urls]
+Source = "https://bitbucket.org/aplkaiju/ezieview/"
+"Science Gateway" = "https://eziegw.jhuapl.edu"
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+
 # TODO: transition to "real" pypi.org when ready
 [[tool.uv.index]]
 name = "testpypi"
@@ -57,10 +73,6 @@ classifiers = [
 ]
 license = ["BSD 3-Clause"]
 license-files = ["LICENSE.md"]
-
-[project.urls]
-Source = "https://bitbucket.org/aplkaiju/ezieview/"
-"Science Gateway" = "https://eziegw.jhuapl.edu"
 
 # TODO: following still TBD, along with where the actual public repo will be hosted
 # Documentation = ""  # RTD? GitHub Pages is free for repos on GitHub.
