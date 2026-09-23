@@ -99,6 +99,10 @@ NCDF_MISSING = default_fillvals["f4"]
 # Offset slightly from 90 because some mapping-related package has begun throwing errors
 # when 90 is used following recent updates.
 POLE_LAT = 89.0
+MEM_BEAM_DIAGRAM_PATH = (
+    Path(__file__).parent.parent / "binary-assets" / "SV_NOSVFRAME.png"
+    # Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
+)
 # endregion
 
 
@@ -1142,10 +1146,6 @@ def plot_retrieved_b_fields(
         None
     """
 
-    #
-    # Returns:
-    # None
-
     logger.info("Generating retrieved and reference B field plots")
     if dark_mode:
         plt.style.use("dark_background")
@@ -1401,7 +1401,6 @@ def plot_retrieved_b_fields(
                     # Stick B_total on top, even though it's last in list of components
                     row = (mem_ndx // cols) * NUM_FLD + (fld_ndx + 1) % NUM_FLD
                 mem_axs = axs[row, col]
-                # mem_axs.set_ylim([-2.0e4, 4.0e4])  # FIXME
                 tot_rng = b_rng[fld_ndx][1] - b_rng[fld_ndx][0]
                 mem_axs.set_ylim(
                     b_rng[fld_ndx][i] + tot_rng * x
@@ -1492,7 +1491,6 @@ def plot_retrieved_bd_only(
     source: Path,
     save_directory: Path,
     version: str | None = None,
-    # mode: str = "Uncorrected",
     figure_dpi: int = DFLT_RES,
     dark_mode: bool = False,
     south_inverted: bool = False,
@@ -1525,6 +1523,7 @@ def plot_retrieved_bd_only(
     # Deprecated option, will be removed
     # mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
     #     Defaults to "Uncorrected".
+    mode = "Corrected"  # FIXME - no longer using this with new CDL+retrieval algorithm
     if dark_mode:
         plt.style.use("dark_background")
         plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
@@ -1740,11 +1739,12 @@ def plot_retrieved_bd_only(
 
         # Place label with receiver number at top of each column
         mem_axs.set_ylabel(f"MEM {mem_num} dB$_\\mathbf{{D}}$ (nT)", weight="bold")
+        offnad_offset = 0.01
+        fw, fh = fig.get_figwidth(), fig.get_figheight()
         mem_axs.text(
-            0.01,
-            0.99,
-            f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}"
-            r"º",
+            offnad_offset,
+            1.0 - offnad_offset * fw / fh,
+            f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}" r"º",
             weight="bold",
             size="medium",
             va="top",
@@ -1932,9 +1932,7 @@ def plot_retrieved_bd_only(
     fh = fig.get_figheight()
     fig_aspect_ratio = fw / fh
     # ll, bb, ww, hh = map_axs.get_position().bounds
-    mem_beam_img = plt.imread(
-        Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
-    )
+    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
     img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
     hi = 0.29
     wi = hi * img_aspect_ratio / fig_aspect_ratio
@@ -1944,9 +1942,9 @@ def plot_retrieved_bd_only(
     )
     img_axs.imshow(mem_beam_img, aspect="auto")
     # Just turn ticks off so we get a border around image.
-    img_axs.set_xticks([])
-    img_axs.set_yticks([])
-    # img_axs.axis("off")
+    # img_axs.set_xticks([])
+    # img_axs.set_yticks([])
+    img_axs.axis("off")
 
     # Tweak position and add any figure-level annotation
     fig_title = f"{mode} Retrieved Magnetic Field Deltas: "
@@ -2809,19 +2807,16 @@ def plot_mag_and_geo_maps(
     fw = fig.get_figwidth()
     fh = fig.get_figheight()
     fig_aspect_ratio = fw / fh
-    mem_beam_img = plt.imread(
-        Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
-    )
+    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
     img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
     hi = 0.31
     wi = hi * img_aspect_ratio / fig_aspect_ratio
-    # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
     img_axs = fig.add_axes(rect=(0.76 - wi / 2, 0.025 * fig_aspect_ratio, wi, hi))
     img_axs.imshow(mem_beam_img, aspect="auto")
     # Just turn ticks off so we get a border around image, not entire axis.
-    # img_axs.axis("off")
-    img_axs.set_xticks([])
-    img_axs.set_yticks([])
+    # img_axs.set_xticks([])
+    # img_axs.set_yticks([])
+    img_axs.axis("off")  # EVERYTHING off
 
     # Tweak position and add any figure-level annotation
     fig_title = (
@@ -3426,19 +3421,19 @@ def plot_b_1D_maps_with_time(
 
     if hemisphere is not None:
         subtitle = (
-            "Plot is in Geodetic/WGS84 coordinates (solid grid). "
-            "Labels indicate Local Time (LT). "
-            "Magnetic latitude (dashed grid) is also shown."
+            "Currents (black arrows) are plotted in Geodetic/WGS84 coordinates (solid "
+            "grid).\nLabels indicate Local Time (LT). Magnetic latitude (dashed grid) "
+            "is also shown."
         )
     else:
-        subtitle = (
-            "Plot is in Geodetic/WGS84 coordinates (solid grid). "
-            "Magnetic latitude (dashed grid) and drift equator "
-            "(thick solid line) are also shown."
-        )
+        subtitle = """
+           Currents (black arrows) are plotted in Geodetic/WGS84 coordinates (solid
+           grid). Magnetic latitude (dashed grid) and drift equator (thick solid line)
+           are also shown.
+           """
     fig.text(
         0.50,
-        0.91,
+        0.90,
         subtitle,
         wrap=False,
         ha="center",
@@ -3679,6 +3674,7 @@ def plot_retrieved_B_and_J(
     t_stamp = time_utc[0].strftime("%H%M%S")
     orb_num = nc2_data["Science/orbit_number"][0]
     sc_id = nc2_data["Metadata/SpaceVehicle"][0]
+
     # This field _should_ be constant but do the following for robustness?
     reference_altitude_km = np.nanmedian(nc2_data["Geolocation/reference_altitude"])
 
@@ -3700,7 +3696,7 @@ def plot_retrieved_B_and_J(
     ave_win = min(AVERAGING_WINDOW, max_win)
 
     # Extract MEM retrieved dBs, geolocation and magnetic coordinates, covariance fields
-    mem_dbd_val = [f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS]
+    mem_db_val = [f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS]
     plot_type = "retrieved_b_and_j"
 
     ftgt, old_hash, new_hash = save_close_figure(
@@ -3727,18 +3723,18 @@ def plot_retrieved_B_and_J(
     rtrvgrp = nc2_data.groups["RetrievedParameters"]
     if "observation_valid" in rtrvgrp.variables:  # NEW format
         # TODO: Need to support dbmag or dbdown?
-        mem_dbd_val = [f"RetrievedParameters/debiased_dbmag{mm}" for mm in MEM_NUMBERS]
-        mem_bdd_cov = [
+        mem_db_str = "RetrievedParameters/debiased_dbmag"
+        mem_db_val = [f"{mem_db_str}{mm}" for mm in MEM_NUMBERS]
+        mem_db_err = [
             f"RetrievedParameters/retrieved_dbmag_error{mm}" for mm in MEM_NUMBERS
         ]
-        mem_cdd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
+        mem_err = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_db_err],))
     else:
-        mem_dbd_val = [
-            f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS
-        ]
+        mem_db_str = "RetrievedParameters/retrieved_dbgeod"
+        mem_db_val = [f"{mem_db_str}{mm}" for mm in MEM_NUMBERS]
         mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
-        mem_cdd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
-        mem_cdd = np.sqrt(mem_cdd)  # Covariance is in nc4 files, not error
+        mem_err = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
+        mem_err = np.sqrt(mem_err)  # Covariance is in nc4 files, not error
 
     mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
     mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
@@ -3748,7 +3744,7 @@ def plot_retrieved_B_and_J(
     # Stack MEM arrays so we can index and loop through them by number rather than using
     # 4 separate variable names.
     # FIXME - kludge to use old L2 file - comment out line below
-    mem_dbd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_dbd_val],))
+    mem_dbd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_db_val],))
     mag_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_lat],))
     mag_ltm = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_LTm],))
     obs_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_obs_lat],))
@@ -3776,12 +3772,13 @@ def plot_retrieved_B_and_J(
 
     # use = np.full_like(time_utc[:], fill_value=True, dtype=bool)
     fig = plt.figure(figsize=DEFAULT_FIG_SIZE)
+    dbcols = 3
     ags = GridSpec(nrows, ncols, figure=fig)
-    ax0 = fig.add_subplot(ags[0, 0:3])
-    ax1 = fig.add_subplot(ags[1, 0:3], sharex=ax0)
-    ax2 = fig.add_subplot(ags[2, 0:3], sharex=ax0)
-    ax3 = fig.add_subplot(ags[3, 0:3], sharex=ax0)
-    ax4 = fig.add_subplot(ags[4, 0:3], sharex=ax0)
+    ax0 = fig.add_subplot(ags[0, 0:dbcols])
+    ax1 = fig.add_subplot(ags[1, 0:dbcols], sharex=ax0)
+    ax2 = fig.add_subplot(ags[2, 0:dbcols], sharex=ax0)
+    ax3 = fig.add_subplot(ags[3, 0:dbcols], sharex=ax0)
+    ax4 = fig.add_subplot(ags[4, 0:dbcols], sharex=ax0)
     axs = [ax0, ax1, ax2, ax3, ax4]
 
     # # Hide all axes on RHS - we'll add "special" axes manually there.
@@ -3801,6 +3798,15 @@ def plot_retrieved_B_and_J(
     lat_axs.grid(axis="both")
     lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
     lat_axs.set_xlabel("Time (UTC)", weight="bold")
+    lat_axs.text(
+        x=-0.05,
+        y=-0.19,
+        s=f"B perturbation source: {mem_db_str}",
+        size="x-small",
+        transform=lat_axs.transAxes,
+        va="top",
+        weight="bold",
+    )
     mlt_axs = lat_axs.twinx()
     mlt_axs.set_ylim(-0.5, 24.5)
     mlt_axs.set_yticks(range(0, 25, 6))
@@ -3831,7 +3837,7 @@ def plot_retrieved_B_and_J(
         mem_axs.errorbar(
             time_utc[use_obs],
             mem_dbd[mem_ndx][use_obs],
-            yerr=mem_cdd[mem_ndx][use_obs],
+            yerr=mem_err[mem_ndx][use_obs],
             color=MEM_CLR[mem_ndx],
             ecolor="purple",
             linestyle="solid",
@@ -3850,11 +3856,11 @@ def plot_retrieved_B_and_J(
         try:
             b_rng[0] = np.nanmin(
                 list(b_rng[0:1])
-                + list(mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs])
+                + list(mem_dbd[mem_ndx][use_obs] - mem_err[mem_ndx][use_obs])
             )
             b_rng[1] = np.nanmax(
                 list(b_rng[1:2])
-                + list(mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs])
+                + list(mem_dbd[mem_ndx][use_obs] + mem_err[mem_ndx][use_obs])
             )
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
@@ -3867,12 +3873,14 @@ def plot_retrieved_B_and_J(
         mem_axs.axhline(0, ls="dotted", color="black")
 
         # Place label with receiver number at top of each column
-        mem_axs.set_ylabel(f"MEM {mem_num} dB$_\\mathbf{{D}}$ (nT)", weight="bold")
+        mem_axs.set_ylabel(f"MEM {mem_num} d|B| (nT)", weight="bold")
+        offnad_offset = 0.01
+        fw, fh = fig.get_figwidth(), fig.get_figheight()
+        axs_asp_rat = nrows * dbcols / ncols * fw / fh  # ~  the _axis_ aspect ratio?
         mem_axs.text(
-            0.01,
-            0.99,
-            f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}"
-            r"º",
+            x=offnad_offset,
+            y=1.0 - offnad_offset * axs_asp_rat,
+            s=f"Off-Nadir Angle: {MEM_LOOK_DIRECTIONS[mem_ndx]}" r"º",
             weight="bold",
             size="medium",
             va="top",
@@ -3883,11 +3891,8 @@ def plot_retrieved_B_and_J(
         # Label only leftmost column y axis
         if row == 0:
             mem_axs.set_title(
-                (
-                    "Retrieved Magnetic Field Magnitude Perturbation (nT)"
-                    f"B$_\\mathbf{{{reference_altitude_km}\\ km}}$"
-                    " Field Vectors (nT)"
-                ),
+                f"Retrieved Magnetic Field Magnitude Perturbation (nT) at Reference "
+                f"Altitude ({reference_altitude_km} km)",
                 weight="bold",
                 size="medium",
             )
@@ -4062,20 +4067,18 @@ def plot_retrieved_B_and_J(
     fw = fig.get_figwidth()
     fh = fig.get_figheight()
     fig_aspect_ratio = fw / fh
-    mem_beam_img = plt.imread(
-        Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
-    )
+    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
     img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
-    hi = 0.18
+    hi = 0.22
     wi = hi * img_aspect_ratio / fig_aspect_ratio
-    beamsx, beamsy = 0.62, 0.46 - hi / 2
+    beamsx, beamsy = 0.62, 0.44 - hi / 2
     # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
     img_axs: plt.Axes = fig.add_axes(rect=(beamsx, beamsy, wi, hi))
     img_axs.imshow(mem_beam_img, aspect="auto", zorder=3)
     # Just turn ticks off so we get a border around image.
-    img_axs.set_xticks([])
-    img_axs.set_yticks([])
-    # img_axs.axis("off")
+    # img_axs.set_xticks([])
+    # img_axs.set_yticks([])
+    img_axs.axis("off")
 
     with Dataset(nc3_sorc, mode="r") as nc3_data:
         try:
@@ -4420,17 +4423,18 @@ def plot_retrieved_B_and_J(
 
     # Observed (L2) B
     valid = obs_B != NCDF_MISSING
-    sc = l3_map_axs.scatter(
-        MLT_sign * lons[valid],
-        lats[valid],
-        c=obs_B[valid],
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-        # s=b_mrk_sz,
-        # marker="o",
+    _sc = l3_map_axs.scatter(
+        x=MLT_sign * lons[valid],
+        y=lats[valid],
         s=b_mrk_sz / 4,
-        marker="s",
+        c="none",
+        edgecolors="xkcd:black",
+        linewidths=0.5,
+        # c=obs_B[valid],
+        # cmap=cmap,
+        # vmin=vmin,
+        # vmax=vmax,
+        marker=".",
         transform=DATA_TRANSFORM,
     )
 
@@ -4439,27 +4443,16 @@ def plot_retrieved_B_and_J(
     cax = divider.append_axes("right", size="3%", pad=0.7, axes_class=maxes.Axes)
     cbar = fig.colorbar(sc, cax=cax)
     cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
-    # fig.suptitle(
-    #     (
-    #         f"L3 and L2: EZIE-{prsd.spcv.upper()} \n"
-    #         f"{time_utc[0].strftime('%B %d, %Y %H:%M:%S')} - "
-    #         f"{time_utc[-1].strftime('%H:%M:%S')}\n"
-    #     ),
-    #     y=0.99,
-    #     va="top",
-    #     fontsize="x-large",
-    #     fontweight="bold",
-    # )
 
     if hemisphere is not None:
         subtitle = f"""
             Currents (black arrows) are plotted above in Geodetic/WGS84 coordinates
             (solid grid). Labels indicate Local Time (LT). Magnetic latitude (dashed
-            grid) is also shown. MEM footprints are plotted below in Apex Geomagnetic
-            coordinates.
+            grid) is also shown. MEM footprints (black dots above) are also plotted
+            below in Apex Geomagnetic coordinates.
 
-            The MEM dB data cadence at left is 2 seconds. The black line is the running
-            average of {AVERAGING_WINDOW} samples.
+            The MEM d|B| data plotted at left is sampled at a 2 second cadence. The
+            black line is the running average of {AVERAGING_WINDOW} samples.
             """
     else:
         subtitle = f"""
@@ -4472,7 +4465,7 @@ def plot_retrieved_B_and_J(
             average of {AVERAGING_WINDOW} samples.
             """
     fig.text(
-        0.71,
+        0.705,
         0.50,
         subtitle,
         wrap=False,

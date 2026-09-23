@@ -313,20 +313,7 @@ def main(
                         source=each_file,
                         save_directory=out_dir_path,
                         version=version,
-                        mode="Corrected",
                         south_inverted=True,  # Use heliospheric community mapping style
-                        overwrite=overwrite,
-                        figure_dpi=300,
-                        dark_mode=dark_mode,
-                    )  # Requires L2 or higher level products files
-
-                    gw_plot_methods.plot_retrieved_bd_only(
-                        nc_data=nc_data,
-                        source=each_file,
-                        save_directory=out_dir_path,
-                        version=version,
-                        mode="Uncorrected",
-                        south_inverted=True,
                         overwrite=overwrite,
                         figure_dpi=300,
                         dark_mode=dark_mode,
@@ -338,7 +325,6 @@ def main(
                         nc2_sorc=each_file,
                         save_directory=out_dir_path,
                         version=version,
-                        mode="Corrected",
                         south_inverted=True,  # Use heliospheric community mapping style
                         overwrite=overwrite,
                         figure_dpi=300,

@@ -83,7 +83,7 @@ COVERAGE_UNITS = ["degrees", "hours", "degrees"]
 DATA_TRANSFORM = ccrs.PlateCarree()
 
 # Was 9--used to smooth noisy values for plotting. Current test data has no added noise.
-AVERAGING_WINDOW = 11
+AVERAGING_WINDOW = 5
 
 SPACECRAFT = ["EZIE-A", "EZIE-B", "EZIE-C"]
 NUM_SPC = len(SPACECRAFT)

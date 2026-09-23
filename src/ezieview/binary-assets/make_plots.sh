@@ -6,16 +6,17 @@
 #   EZ_OVERWRITE = False ==> Generate only those images that do NOT already exist
 # =====================================================================================
 
-# EZ_OVERWRITE=True
-EZ_OVERWRITE=False
-EZ_BGN_DATE="2026-02-22"
-EZ_END_DATE="2026-02-22"
+EZ_OVERWRITE=True
+# EZ_OVERWRITE=False
+
+EZ_BGN_DATE="2025-05-29"
+EZ_END_DATE="2025-05-29"
 
 # =====================================================================================
 # Specify product source directories to be processed & corresponding output locations
 # =====================================================================================
 
-EZ_DATA_ROOT="/project/ezie/data"
+EZ_DATA_ROOT="/project/ezie/data-new"
 EZ_L1_DATA="${EZ_DATA_ROOT}/l1/orbit"
 EZ_L2_DATA="${EZ_DATA_ROOT}/l2"
 EZ_L3_DATA="${EZ_DATA_ROOT}/l3"
@@ -43,7 +44,7 @@ set | grep EZ_ | grep "DATE" | sort
 set | grep EZ_ | grep "PTRN" | sort
 set | grep EZ_ | grep "DATA" | sort
 set | grep EZ_ | grep "PLOT" | sort
-set | grep EZ_ | egrep -v "DATE|PTRN|DATA|PLOT"  | sort
+set | grep EZ_ | grep -Ev "DATE|PTRN|DATA|PLOT"  | sort
 echo "==================================================================="
 } >> "$LOGFILE" 
 
@@ -89,4 +90,5 @@ python3 -m ezieview.update_orbit_plots \
     -d1 "${EZ_END_DATE}" \
     -fd "${EZ_L2_DATA}" \
     -pd "${EZ_L2_PLOT}" \
-    -over "${EZ_OVERWRITE}" -merged
+    -over "${EZ_OVERWRITE}" \
+    -merged True
