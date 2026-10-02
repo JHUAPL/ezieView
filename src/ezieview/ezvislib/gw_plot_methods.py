@@ -3231,18 +3231,52 @@ def l3_map(
             "cmap_name", [color_min, color_center, color_max]
         )
     else:
-        cmap = plt.cm.bwr
+        # cmap = plt.cm.bwr
+        cmap = plt.cm.coolwarm
 
     # Model B
     valid = model_B != NCDF_MISSING
-    sc = l3_map_axs.scatter(
-        MLT_sign * lon_mesh[valid].flatten(),
-        lat_mesh[valid].flatten(),
-        c=b_sign_mod * model_B[valid].flatten(),
+
+    vmin = -1000
+    vmax = +1000
+
+    # sc = l3_map_axs.scatter(
+    #     MLT_sign * lon_mesh[valid].flatten(),
+    #     lat_mesh[valid].flatten(),
+    #     c=b_sign_mod * model_B[valid].flatten(),
+    #     cmap=cmap,
+    #     vmin=vmin,
+    #     vmax=vmax,
+    #     s=b_mrk_sz,
+    #     transform=DATA_TRANSFORM,
+    # )
+
+    def smooth_along_track(values, window=5):
+        kernel = np.ones(window, dtype=float)
+        smoothed = np.empty_like(values, dtype=float)
+
+        for i in range(values.shape[0]):
+            row = np.asarray(values[i], dtype=float)
+            valid = np.isfinite(row).astype(float)
+            filled = np.where(np.isfinite(row), row, 0.0)
+
+            numer = np.convolve(filled, kernel, mode="same")
+            denom = np.convolve(valid, kernel, mode="same")
+
+            smoothed[i] = np.where(denom > 0, numer / denom, np.nan)
+
+        return smoothed
+
+    obs_bmag_smooth = smooth_along_track(model_B, window=5)
+
+    sc = l3_map_axs.pcolormesh(
+        lon_mesh,
+        lat_mesh,
+        b_sign_mod * obs_bmag_smooth,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        s=b_mrk_sz,
+        shading="auto",
         transform=DATA_TRANSFORM,
     )
 
@@ -3291,7 +3325,7 @@ def l3_map(
     cax = divider.append_axes("right", size="3%", pad=0.7, axes_class=maxes.Axes)
     cbar = fig.colorbar(sc, cax=cax)
     # cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
-    cbar.set_label("B$_{{down}}$ [nT]")
+    cbar.set_label("dB$_{{down}}$ [nT]")
 
 
 def plot_b_1D_maps_with_time(
@@ -3305,7 +3339,7 @@ def plot_b_1D_maps_with_time(
     dark_mode: bool = False,
     old_format: bool = False,
     overwrite: bool = False,
-    show_b_value: bool = False,
+    show_b_value: bool = True,
 ):
     """
     Plot the retrieved 1-D B field maps versus time for L3 products.
@@ -3818,8 +3852,8 @@ def plot_retrieved_B_and_J(
     use_obs = np.s_[:]  # See how things look without the haircut now
 
     # Define smoothing parameters for curve to be overlain on (noisy) dB plots.
-    max_win = len(time_utc[use_obs])
-    ave_win = min(AVERAGING_WINDOW, max_win)
+    num_tim = len(time_utc[use_obs])
+    ave_win = min(AVERAGING_WINDOW, num_tim)
 
     # Extract MEM retrieved dBs, geolocation and magnetic coordinates, covariance fields
     mem_db_val = [f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS]
@@ -3906,6 +3940,214 @@ def plot_retrieved_B_and_J(
     ax4 = fig.add_subplot(ags[4, 0:dbcols], sharex=ax0)
     axs = [ax0, ax1, ax2, ax3, ax4]
 
+    with Dataset(nc3_sorc, mode="r") as nc3_data:
+        try:
+            time_utc = np.array(
+                [
+                    datetime.datetime.fromisoformat(_)
+                    for _ in nc3_data["/l2_data/time_utc"][:]
+                ]
+            )
+        except Exception as exc:
+            logger.error(f"Encountered exception while processing L3 file: {exc}")
+            return
+
+        if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
+            raise TypeError(
+                "obs_time must contain datetime.datetime or np.datetime64 objects."
+            )
+
+        # Use midpoint to select map orientation
+        midpt = len(time_utc) // 2
+        lat_at_midpt = nc3_data["l2_data/sc_lat"][midpt]
+        lon_at_midpt = nc3_data["l2_data/sc_lon"][midpt]
+
+        # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
+        # gridlines, play with the map projection as needed.
+        if lat_at_midpt > +40:  # hemisphere = NORTH
+            hemisphere = NORTH
+        elif lat_at_midpt < -40:  # hemisphere = SOUTH
+            hemisphere = SOUTH
+        else:
+            hemisphere = None
+            logger.warning(
+                f"L3 file appears to contain EEJ pass, skipping: {nc3_sorc.as_posix()}"
+            )
+            return
+
+        # Grab J, B, and coordinate data arrays
+        lat_mesh = nc3_data["/l3_data/lat"][:]
+        lon_mesh = nc3_data["/l3_data/lon"][:]
+        model_B = nc3_data["/l3_data/Bd_geod_80"][:]
+        Je = nc3_data["/l3_data/Je_110"][:]
+        Jn = nc3_data["/l3_data/Jn_110"][:]
+        lats = nc3_data["/l2_data/lat"][:]
+        lons = nc3_data["/l2_data/lon"][:]
+        l2grp = nc3_data.groups["l2_data"]
+        if "Bd_geod_80" in l2grp.variables:  # NEW format
+            obs_B = nc3_data["/l2_data/Bd_geod_80"][:]
+            algorithm = "down"
+        elif "Bmag_80" in l2grp.variables:  # NEW format
+            obs_B = nc3_data["/l2_data/Bmag_80"][:]
+            algorithm = "mag"
+        model_B = model_B.reshape(lat_mesh.shape)
+
+    if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
+        logger.warning(
+            f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
+        )
+        return
+
+    logger.info(f"Generating L3 plot {ftgt.stem}")
+
+    # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
+    # display projected geodetic coordinates for now, pending addition of magnetic
+    # coordinate counterparts to the L3 files.
+    sun_geo_tuple_rad = []
+
+    # Compute position of sun in both geodetic and geomagnetic coordinates for the
+    # observation midpoint time.
+    tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
+    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
+        "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
+    )
+    # Get the subsolar point on the surface in geodetic coordinates.
+    sun_geo_tuple_rad = spiceypy.recgeo(
+        subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING
+    )
+    sun_geo_lon_mid = np.degrees(sun_geo_tuple_rad[0])
+    if sun_geo_lon_mid > 180.0:
+        sun_geo_lon_mid -= 360.0
+
+    # Save for potential later use?
+    # Compute the subsolar point in APEX magnetic coordinates
+    # apex = Apex(
+    #     date=time_utc[midpt].year,
+    #     refh=0,  # Leave at default (0), or set to 80 km? TBD
+    # )
+    # _sun_mag_lat_mid, _sun_mag_lon_mid = apex.geo2apex(
+    #     sun_geo_lat_mid,
+    #     sun_geo_lon_mid,
+    #     reference_altitude_km,
+    # )
+
+    # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
+    # to be the ACTUAL mlats for APEX, with sign appropriate for the selected hemisphere
+    # regardless of any projection tricks we might apply. 'MLT_sign' is used to "trick"
+    # cartopy into plotting the southern hemisphere in an inverted/transparent earth
+    # format used for heliophysics, where we look down at the SOUTH pole from above the
+    # NORTH pole, as if the earth were transparent. This 'south_inverted' format keeps
+    # Noon, Dawn, etc. in the same relative positions and orientation for both
+    # hemispheres. To get the south_inverted projection we apply the MLT_sign multiplier
+    # (-1 for this case) to the "projected" quantitites. Latitudes retain their normal
+    # hemisphere-appropriate sense.
+    MLT_sign = +1
+    if hemisphere == NORTH:
+        lats_m = np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
+        map_proj = ccrs.NorthPolarStereo(
+            central_longitude=sun_geo_lon_mid + 180,
+            true_scale_latitude=+60,
+        )
+    elif hemisphere == SOUTH:
+        lats_m = -1 * np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
+        if south_inverted:
+            MLT_sign = -1
+        map_proj = ccrs.SouthPolarStereo(
+            central_longitude=MLT_sign * sun_geo_lon_mid,
+            true_scale_latitude=-60,
+        )
+    else:
+        lats_m = np.arange(-GEO_LAT_LOWER_LIMIT, +GEO_LAT_LOWER_LIMIT, 10.0)
+        map_proj = ccrs.Stereographic(
+            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
+        )
+
+    # Set up axis and projection for cartopy
+    maprowspan, mapcolspan = 2, 2  # 5 rows for geographic coordinate inset
+    l3_map_axs: GeoAxes = plt.subplot2grid(
+        (nrows, ncols),
+        (0, ncols - mapcolspan),
+        fig=fig,
+        projection=map_proj,
+        rowspan=maprowspan,
+        colspan=mapcolspan,
+    )  # ty:ignore[invalid-assignment]
+
+    l3_map(
+        l3_map_axs=l3_map_axs,
+        time_utc=time_utc,
+        lons=lons,
+        lon_mesh=lon_mesh,
+        lats=lats,
+        lat_mesh=lat_mesh,
+        lats_m=lats_m,
+        Jn=Jn,
+        Je=Je,
+        model_B=model_B,
+        obs_B=obs_B,
+        fig=fig,
+        hemisphere=hemisphere,
+        algorithm=algorithm,
+        MLT_sign=MLT_sign,
+        midpt=midpt,
+        sun_geo_lon_mid=sun_geo_lon_mid,
+        map_proj=map_proj,
+        south_inverted=False,
+        dark_mode=dark_mode,
+        stretch=0.06,
+        show_b_value=show_b_value,
+    )
+
+    if algorithm == "down":
+        mag_label = "dB$_\\mathbf{{D}}$"
+    else:
+        mag_label = "d|B|"
+    if hemisphere is not None:
+        if show_b_value:
+            mem_fp_desc = (
+                f"circles, colored according to the observed value of {mag_label}"
+            )
+        else:
+            mem_fp_desc = "black dots"
+
+        subtitle1 = f"""Currents (black arrows) are plotted above in Geodetic/WGS84
+        coordinates (solid grid). Labels indicate Local Time (LT). Magnetic latitude
+        (dashed grid) is also shown. MEM footprint locations, shown above as
+        {mem_fp_desc}, are also plotted below in Apex Geomagnetic coordinates."""
+
+    else:
+        subtitle1 = """Currents (black arrows) are plotted in Geodetic/WGS84
+        coordinates (solid grid). Magnetic latitude (dashed grid) and drift equator
+        (thick solid line) are also shown. MEM footprints are plotted below in Apex
+        Geomagnetic coordinates."""
+
+    subtitle2 = f"""The MEM d|B| data plotted at left is sampled at a 2 second cadence.
+    The black lines are the running average of {AVERAGING_WINDOW} samples. The magenta
+    lines show the modeled dB$_{{down}}$ values sampled along each MEM
+    footprint."""
+
+    fig.text(
+        0.705,
+        0.51,
+        " ".join(subtitle1.split()),
+        wrap=True,
+        ha="left",
+        va="center",
+        fontsize="x-small",
+        fontweight="bold",
+    )
+
+    fig.text(
+        0.705,
+        0.46,
+        " ".join(subtitle2.split()),
+        wrap=True,
+        ha="left",
+        va="center",
+        fontsize="x-small",
+        fontweight="bold",
+    )
+
     # We'll save the total variable range for each field component across
     # all MEMs here, adjusting plot limits afterwards when we know what the
     # correct range is for the whole ensemble.
@@ -3970,6 +4212,29 @@ def plot_retrieved_B_and_J(
             lw=1.0,
             zorder=3,
         )
+
+        def mem_nearest(mem_lon, mem_lat):
+            b_nearest = np.zeros((num_tim, 2), dtype=int)
+            new_shape = lon_mesh.shape
+            for xx in range(num_tim):
+                b_nearest[xx, :] = np.unravel_index(
+                    np.argmin(
+                        (mem_lon[xx] - lon_mesh) ** 2 + (mem_lat[xx] - lat_mesh) ** 2
+                    ),
+                    new_shape,
+                )
+            return b_nearest
+
+        sample_pts = mem_nearest(lons[mem_ndx, use_obs], lats[mem_ndx, use_obs])
+        mem_axs.plot(
+            time_utc[use_obs],
+            [model_B[x, y] for x, y in sample_pts],
+            color="magenta" if not dark_mode else DARK_MODE_TEXT_COLOR,
+            linestyle="solid",
+            lw=1.0,
+            zorder=2,
+        )
+
         try:
             b_rng[0] = np.nanmin(
                 list(b_rng[0:1])
@@ -4200,213 +4465,6 @@ def plot_retrieved_B_and_J(
     # img_axs.set_xticks([])
     # img_axs.set_yticks([])
     img_axs.axis("off")
-
-    with Dataset(nc3_sorc, mode="r") as nc3_data:
-        try:
-            time_utc = np.array(
-                [
-                    datetime.datetime.fromisoformat(_)
-                    for _ in nc3_data["/l2_data/time_utc"][:]
-                ]
-            )
-        except Exception as exc:
-            logger.error(f"Encountered exception while processing L3 file: {exc}")
-            return
-
-        if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
-            raise TypeError(
-                "obs_time must contain datetime.datetime or np.datetime64 objects."
-            )
-
-        # Use midpoint to select map orientation
-        midpt = len(time_utc) // 2
-        lat_at_midpt = nc3_data["l2_data/sc_lat"][midpt]
-        lon_at_midpt = nc3_data["l2_data/sc_lon"][midpt]
-
-        # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
-        # gridlines, play with the map projection as needed.
-        if lat_at_midpt > +40:  # hemisphere = NORTH
-            hemisphere = NORTH
-        elif lat_at_midpt < -40:  # hemisphere = SOUTH
-            hemisphere = SOUTH
-        else:
-            hemisphere = None
-            logger.warning(
-                f"L3 file appears to contain EEJ pass, skipping: {nc3_sorc.as_posix()}"
-            )
-            return
-
-        # Grab J, B, and coordinate data arrays
-        lat_mesh = nc3_data["/l3_data/lat"][:]
-        lon_mesh = nc3_data["/l3_data/lon"][:]
-        model_B = nc3_data["/l3_data/Bd_geod_80"][:]
-        Je = nc3_data["/l3_data/Je_110"][:]
-        Jn = nc3_data["/l3_data/Jn_110"][:]
-        lats = nc3_data["/l2_data/lat"][:]
-        lons = nc3_data["/l2_data/lon"][:]
-        l2grp = nc3_data.groups["l2_data"]
-        if "Bd_geod_80" in l2grp.variables:  # NEW format
-            obs_B = nc3_data["/l2_data/Bd_geod_80"][:]
-            algorithm = "down"
-        elif "Bmag_80" in l2grp.variables:  # NEW format
-            obs_B = nc3_data["/l2_data/Bmag_80"][:]
-            algorithm = "mag"
-        model_B = model_B.reshape(lat_mesh.shape)
-
-    if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
-        logger.warning(
-            f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
-        )
-        return
-
-    logger.info(f"Generating L3 plot {ftgt.stem}")
-
-    # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
-    # display projected geodetic coordinates for now, pending addition of magnetic
-    # coordinate counterparts to the L3 files.
-    sun_geo_tuple_rad = []
-
-    # Compute position of sun in both geodetic and geomagnetic coordinates for the
-    # observation midpoint time.
-    tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
-    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
-        "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
-    )
-    # Get the subsolar point on the surface in geodetic coordinates.
-    sun_geo_tuple_rad = spiceypy.recgeo(
-        subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING
-    )
-    sun_geo_lon_mid = np.degrees(sun_geo_tuple_rad[0])
-    if sun_geo_lon_mid > 180.0:
-        sun_geo_lon_mid -= 360.0
-
-    # Save for potential later use?
-    # Compute the subsolar point in APEX magnetic coordinates
-    # apex = Apex(
-    #     date=time_utc[midpt].year,
-    #     refh=0,  # Leave at default (0), or set to 80 km? TBD
-    # )
-    # _sun_mag_lat_mid, _sun_mag_lon_mid = apex.geo2apex(
-    #     sun_geo_lat_mid,
-    #     sun_geo_lon_mid,
-    #     reference_altitude_km,
-    # )
-
-    # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
-    # to be the ACTUAL mlats for APEX, with sign appropriate for the selected hemisphere
-    # regardless of any projection tricks we might apply. 'MLT_sign' is used to "trick"
-    # cartopy into plotting the southern hemisphere in an inverted/transparent earth
-    # format used for heliophysics, where we look down at the SOUTH pole from above the
-    # NORTH pole, as if the earth were transparent. This 'south_inverted' format keeps
-    # Noon, Dawn, etc. in the same relative positions and orientation for both
-    # hemispheres. To get the south_inverted projection we apply the MLT_sign multiplier
-    # (-1 for this case) to the "projected" quantitites. Latitudes retain their normal
-    # hemisphere-appropriate sense.
-    MLT_sign = +1
-    if hemisphere == NORTH:
-        lats_m = np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        map_proj = ccrs.NorthPolarStereo(
-            central_longitude=sun_geo_lon_mid + 180,
-            true_scale_latitude=+60,
-        )
-    elif hemisphere == SOUTH:
-        lats_m = -1 * np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        if south_inverted:
-            MLT_sign = -1
-        map_proj = ccrs.SouthPolarStereo(
-            central_longitude=MLT_sign * sun_geo_lon_mid,
-            true_scale_latitude=-60,
-        )
-    else:
-        lats_m = np.arange(-GEO_LAT_LOWER_LIMIT, +GEO_LAT_LOWER_LIMIT, 10.0)
-        map_proj = ccrs.Stereographic(
-            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
-        )
-
-    # Set up axis and projection for cartopy
-    maprowspan, mapcolspan = 2, 2  # 5 rows for geographic coordinate inset
-    l3_map_axs: GeoAxes = plt.subplot2grid(
-        (nrows, ncols),
-        (0, ncols - mapcolspan),
-        fig=fig,
-        projection=map_proj,
-        rowspan=maprowspan,
-        colspan=mapcolspan,
-    )  # ty:ignore[invalid-assignment]
-
-    l3_map(
-        l3_map_axs=l3_map_axs,
-        time_utc=time_utc,
-        lons=lons,
-        lon_mesh=lon_mesh,
-        lats=lats,
-        lat_mesh=lat_mesh,
-        lats_m=lats_m,
-        Jn=Jn,
-        Je=Je,
-        model_B=model_B,
-        obs_B=obs_B,
-        fig=fig,
-        hemisphere=hemisphere,
-        algorithm=algorithm,
-        MLT_sign=MLT_sign,
-        midpt=midpt,
-        sun_geo_lon_mid=sun_geo_lon_mid,
-        map_proj=map_proj,
-        south_inverted=False,
-        dark_mode=dark_mode,
-        stretch=0.06,
-        show_b_value=show_b_value,
-    )
-
-    if hemisphere is not None:
-        if show_b_value:
-            if algorithm == "down":
-                mag_label = "dB$_\\mathbf{{D}}$"
-            else:
-                mag_label = "d|B|"
-            mem_fp_desc = (
-                f"circles, colored according to the observed value of {mag_label}"
-            )
-        else:
-            mem_fp_desc = "black dots"
-
-        subtitle1 = f"""Currents (black arrows) are plotted above in Geodetic/WGS84
-        coordinates (solid grid). Labels indicate Local Time (LT). Magnetic latitude
-        (dashed grid) is also shown. MEM footprint locations, shown above as
-        {mem_fp_desc}, are also plotted below in Apex Geomagnetic coordinates."""
-
-    else:
-        subtitle1 = """Currents (black arrows) are plotted in Geodetic/WGS84
-        coordinates (solid grid). Magnetic latitude (dashed grid) and drift equator
-        (thick solid line) are also shown. MEM footprints are plotted below in Apex
-        Geomagnetic coordinates."""
-
-    subtitle2 = f"""The MEM d|B| data plotted at left is sampled at a 2 second cadence.
-    The black line is the running average of {AVERAGING_WINDOW} samples."""
-
-    fig.text(
-        0.705,
-        0.51,
-        " ".join(subtitle1.split()),
-        wrap=True,
-        ha="left",
-        va="center",
-        fontsize="x-small",
-        fontweight="bold",
-    )
-
-    fig.text(
-        0.705,
-        0.46,
-        " ".join(subtitle2.split()),
-        wrap=True,
-        ha="left",
-        va="center",
-        fontsize="x-small",
-        fontweight="bold",
-    )
-
     # Tweak position and add any figure-level annotation
     fig_title = "Magnetic Field Perturbations and Currents: "
     fig_title = fig_title + (
