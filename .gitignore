@@ -59,5 +59,8 @@ lsk/
 pck/
 spk/
 
-# uv project manangement files
+# uv project management files
 uv.lock
+
+# Publishing shell script with SECRET API key (do not push to repo or publish!)
+proj_publish.sh
