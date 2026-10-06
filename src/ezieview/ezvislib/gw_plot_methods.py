@@ -4401,7 +4401,7 @@ def ingest_full_day_all_sv(
     # 1) SV
     # 2) L1 var names (from coverage_db_list below)
     coverage_db_list = [
-        # "SpaceVehicle",
+        # "SpaceVehicle",  # Now extracted from global attributes instead
         "/Science/orbit_number",
         "/Geolocation/sat_lat",
         "/Geolocation/sat_lon",
@@ -4447,6 +4447,9 @@ def ingest_full_day_all_sv(
 
                         if prsd.orbt not in date_dict[prsd.spcv]:
                             date_dict[prsd.spcv][prsd.orbt] = {}
+                        # TODO: Check to make sure global attribute matches filename!
+                        # Then eliminate this semi-redundant quantity from date_dict.
+                        date_dict[prsd.spcv][prsd.orbt]["SpaceVehicle"] = prsd.spcv
                         for dbvar in coverage_db_list:
                             try:
                                 date_dict[prsd.spcv][prsd.orbt][dbvar] = nc_data[dbvar][
@@ -4467,6 +4470,8 @@ def ingest_full_day_all_sv(
     # Combine entries from each SV/L1 file into single unified dictionary
     for sv_dict in date_dict.values():
         for orb_dict in sv_dict.values():
+            if orb_dict["SpaceVehicle"] is not None:
+                full_day["SpaceVehicle"].extend(orb_dict["SpaceVehicle"])
             for dbvar in coverage_db_list:
                 full_key = dbvar.split("/")[-1]  # Use only variable name, not group
                 if full_key not in full_day:
