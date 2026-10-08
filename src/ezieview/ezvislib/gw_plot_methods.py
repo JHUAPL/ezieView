@@ -101,7 +101,7 @@ NCDF_MISSING = default_fillvals["f4"]
 # when 90 is used following recent updates.
 POLE_LAT = 89.0
 MEM_BEAM_DIAGRAM_PATH = (
-    Path(__file__).parent.parent / "binary-assets" / "SV_NOSVFRAME.png"
+    Path(__file__).parent.parent / "binary-assets" / "SV_NoSVFrame.png"
     # Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
 )
 # endregion
@@ -3255,6 +3255,9 @@ def l3_map(
         kernel = np.ones(window, dtype=float)
         smoothed = np.empty_like(values, dtype=float)
 
+        if values.shape[1] <= kernel.shape[0]:
+            return values
+
         for i in range(values.shape[0]):
             row = np.asarray(values[i], dtype=float)
             valid = np.isfinite(row).astype(float)
@@ -4449,7 +4452,12 @@ def ingest_full_day_all_sv(
                             date_dict[prsd.spcv][prsd.orbt] = {}
                         # TODO: Check to make sure global attribute matches filename!
                         # Then eliminate this semi-redundant quantity from date_dict.
-                        date_dict[prsd.spcv][prsd.orbt]["SpaceVehicle"] = prsd.spcv
+                        spcv = f"EZIE-{prsd.spcv.upper()}"
+                        logger.debug(f"Setting SpaceVehicle to {spcv}")
+                        date_dict[prsd.spcv][prsd.orbt]["SpaceVehicle"] = np.repeat(
+                            str(spcv),
+                            nc_data.dimensions["ObsRate"].size,
+                        )
                         for dbvar in coverage_db_list:
                             try:
                                 date_dict[prsd.spcv][prsd.orbt][dbvar] = nc_data[dbvar][
@@ -4460,6 +4468,9 @@ def ingest_full_day_all_sv(
                                     str(nc_data[dbvar][:]),
                                     nc_data.dimensions["ObsRate"].size,
                                 )
+                        logger.debug(
+                            f"{date_dict[prsd.spcv][prsd.orbt]['SpaceVehicle']}"
+                        )
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
                         date_dict[prsd.spcv][prsd.orbt][dbvar] = None
@@ -4470,6 +4481,8 @@ def ingest_full_day_all_sv(
     # Combine entries from each SV/L1 file into single unified dictionary
     for sv_dict in date_dict.values():
         for orb_dict in sv_dict.values():
+            if "SpaceVehicle" not in full_day:
+                full_day["SpaceVehicle"] = []
             if orb_dict["SpaceVehicle"] is not None:
                 full_day["SpaceVehicle"].extend(orb_dict["SpaceVehicle"])
             for dbvar in coverage_db_list:
@@ -4490,6 +4503,8 @@ def ingest_full_day_all_sv(
             for dbvar in coverage_db_list:
                 full_key = dbvar.split("/")[-1]  # Use only variable name, not group
                 full_day[full_key] = np.array(full_day[full_key])
+            full_key = "SpaceVehicle"
+            full_day[full_key] = np.array(full_day[full_key])
 
     # FIXME: Not in .nc4 files! Borrowing MEM 1.
     # FIXME: Have these added to netcdf products? Otherwise must compute w/SPICE _here_.

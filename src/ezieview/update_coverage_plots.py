@@ -1065,8 +1065,8 @@ def main(
             used_files=keep_files,
         )  # Full Day Dictionary
 
-        for key, val in fdd.items():
-            logger.debug(f"{key:22s} {len(val)}")
+        # for key, val in fdd.items():
+        #     logger.debug(f"{key:22s} {len(val)}")
 
         # Stack MEM coordinate arrays so we can loop through them in plotting routines
         mem_lat = np.vstack(
