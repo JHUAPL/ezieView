@@ -52,6 +52,9 @@ Thumbs.db
 .github/
 site/
 logs/
+data
+data/
+outputs
 outputs/
 
 # Locally cached NAIF/SPICE kernels

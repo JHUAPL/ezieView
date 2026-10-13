@@ -17,7 +17,7 @@ EZ_END_DATE="2025-06-04"
 # Specify product source directories to be processed & corresponding output locations
 # =====================================================================================
 
-EZ_DATA_ROOT="/project/ezie/data"
+EZ_DATA_ROOT="./data"
 EZ_L1_DATA="${EZ_DATA_ROOT}/l1/orbit"
 EZ_L2_DATA="${EZ_DATA_ROOT}/l2"
 EZ_L3_DATA="${EZ_DATA_ROOT}/l3"
