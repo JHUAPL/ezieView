@@ -6,17 +6,18 @@
 #   EZ_OVERWRITE = False ==> Generate only those images that do NOT already exist
 # =====================================================================================
 
+MULTIPROCESS=True
 EZ_OVERWRITE=True
 # EZ_OVERWRITE=False
 
-EZ_BGN_DATE="2025-05-29"
-EZ_END_DATE="2025-05-29"
+EZ_BGN_DATE="2025-06-04"
+EZ_END_DATE="2025-06-04"
 
 # =====================================================================================
 # Specify product source directories to be processed & corresponding output locations
 # =====================================================================================
 
-EZ_DATA_ROOT="/project/ezie/data-new"
+EZ_DATA_ROOT="/project/ezie/data"
 EZ_L1_DATA="${EZ_DATA_ROOT}/l1/orbit"
 EZ_L2_DATA="${EZ_DATA_ROOT}/l2"
 EZ_L3_DATA="${EZ_DATA_ROOT}/l3"
@@ -50,7 +51,7 @@ echo "==================================================================="
 
 # =====================================================================================
 # Generate image products. Comment in/out product level/type commands as desired.
-# 1) All day orbit/SV coverage --  Mlat/MLT/SZA 
+# 1) All day orbit/SV coverage --  Mlat/MLT/SZA  (No multiprocessing support, unneeded)
 # 2) Ancillary, geolocation, TA, TB
 # 3) B field retrieval, dBd[own] only ATM
 # 4) Current retrieval, based on dBd only ATM
@@ -69,21 +70,8 @@ python3 -m ezieview.update_orbit_plots \
     -d1 "${EZ_END_DATE}" \
     -fd "${EZ_L1_DATA}" \
     -pd "${EZ_L1_PLOT}" \
-    -over "${EZ_OVERWRITE}"
-
-python3 -m ezieview.update_orbit_plots \
-    -d0 "${EZ_BGN_DATE}" \
-    -d1 "${EZ_END_DATE}" \
-    -fd "${EZ_L2_DATA}" \
-    -pd "${EZ_L2_PLOT}" \
-    -over "${EZ_OVERWRITE}"
-
-python3 -m ezieview.update_orbit_plots \
-    -d0 "${EZ_BGN_DATE}" \
-    -d1 "${EZ_END_DATE}" \
-    -fd "${EZ_L3_DATA}" \
-    -pd "${EZ_L3_PLOT}" \
-    -over "${EZ_OVERWRITE}"
+    -over "${EZ_OVERWRITE}" \
+    -mp "${MULTIPROCESS}"
 
 python3 -m ezieview.update_orbit_plots \
     -d0 "${EZ_BGN_DATE}" \
@@ -91,4 +79,21 @@ python3 -m ezieview.update_orbit_plots \
     -fd "${EZ_L2_DATA}" \
     -pd "${EZ_L2_PLOT}" \
     -over "${EZ_OVERWRITE}" \
+    -mp "${MULTIPROCESS}"
+
+python3 -m ezieview.update_orbit_plots \
+    -d0 "${EZ_BGN_DATE}" \
+    -d1 "${EZ_END_DATE}" \
+    -fd "${EZ_L3_DATA}" \
+    -pd "${EZ_L3_PLOT}" \
+    -over "${EZ_OVERWRITE}" \
+    -mp "${MULTIPROCESS}"
+
+python3 -m ezieview.update_orbit_plots \
+    -d0 "${EZ_BGN_DATE}" \
+    -d1 "${EZ_END_DATE}" \
+    -fd "${EZ_L2_DATA}" \
+    -pd "${EZ_L2_PLOT}" \
+    -over "${EZ_OVERWRITE}" \
+    -mp "${MULTIPROCESS}" \
     -merged True

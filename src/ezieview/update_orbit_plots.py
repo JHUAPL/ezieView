@@ -17,6 +17,9 @@ product level (L1, L2, or L3).
 
 # region imports
 import datetime
+import logging
+import multiprocessing
+import os
 from pathlib import Path
 
 import click
@@ -36,6 +39,208 @@ from ezieview.ezvislib.gw_plot_utils import (
 from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
 
 # endregion imports
+
+
+def file_handler(
+    each_file: Path,
+    logger: logging.Logger,
+    out_dir_path: Path,
+    overwrite: bool,
+    dark_mode: bool,
+    figure_dpi: int,
+    merged_l2_l3: bool,
+):
+
+    prsd = parse_ezie_product_name(each_file)
+    if str(prsd.vrsn) == "nan":
+        logger.error(f"Corrupted file name? {each_file}")
+        return
+
+    version = f"{prsd.vrsn}_{prsd.rvsn}"
+
+    # Only one process, they can share the loaded spice kernels
+    spk, lsk, pck = spice_kernel_mgr()
+    spiceypy.furnsh([spk.as_posix(), lsk.as_posix(), pck.as_posix()])
+
+    if "l1" in each_file.stem.lower():
+        with Dataset(each_file, mode="r") as nc_data:
+            try:
+                nobs = nc_data.dimensions["ObsRate"].size
+            except Exception as exc:
+                logger.error(
+                    f"Exception: {exc} obtaining ObsRate in file "
+                    f"{Path(each_file).as_posix()}"
+                )
+                return
+            if nobs < 10:
+                logger.error(
+                    f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
+                )
+                return
+
+            product = nc_data.getncattr("product")
+            if product == "L1":
+                logger.info(f"Processing {product} file {Path(each_file).name}")
+                # Calibration plots requires L1 product file - not populated in L2
+                # product ATM.
+
+                # Slice out the time intervals during which we may have had MEM
+                # observations.
+                # pass_indices = split_on_science_segments(nc_data)  # daily L1
+                pass_indices = [[0, -1]]  # When using per-orbit L1 files as inputs
+
+                for index_pair in pass_indices:
+                    # NOTE: Passing tdiff=True will plot the temperature differences
+                    # from one time step to the next, rather than the current value
+                    # at that timestep (project scientist request).
+
+                    gw_plot_methods.plot_calibration(
+                        nc_data=nc_data,
+                        source=each_file,
+                        indices=index_pair,
+                        save_directory=out_dir_path,
+                        t_diff=False,
+                        overwrite=overwrite,
+                        dark_mode=dark_mode,
+                        figure_dpi=figure_dpi,
+                    )
+
+                    gw_plot_methods.plot_geolocation(
+                        nc_data=nc_data,
+                        source=each_file,
+                        indices=index_pair,
+                        save_directory=out_dir_path,
+                        overwrite=overwrite,
+                        figure_dpi=figure_dpi,
+                        dark_mode=dark_mode,
+                    )  # Requires L0A or higher level product file
+
+                    gw_plot_methods.plot_ancillary(
+                        nc_data=nc_data,
+                        source=each_file,
+                        indices=index_pair,
+                        save_directory=out_dir_path,
+                        overwrite=overwrite,
+                        figure_dpi=figure_dpi,
+                        dark_mode=dark_mode,
+                    )  # Requires L1 or higher level product files
+
+            else:
+                logger.error(f"{product} misidentified as L1-skipping")
+
+    elif "l2" in each_file.stem.lower():
+        # NOTE: L2 files are already segmented into individual science passes based
+        # on the algorithm in split_on_science_segments(). No further distinction
+        # needs to be made.
+
+        try:
+            with Dataset(each_file, mode="r") as nc_data:
+                nobs = nc_data.dimensions["ObsRate"].size
+        except OSError:
+            logger.exception(
+                f"Unable to open file {Path(each_file).as_posix()}", stack_info=True
+            )
+            return
+
+        with Dataset(each_file, mode="r") as nc_data:
+            nobs = nc_data.dimensions["ObsRate"].size
+            if nobs < 10:
+                logger.error(
+                    f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
+                )
+                return
+            if nc_data.getncattr("product") == "L2" and not merged_l2_l3:
+                logger.info(f"Processing L2 file {Path(each_file).name}")
+
+                gw_plot_methods.plot_retrieved_bd_only(
+                    nc_data=nc_data,
+                    source=each_file,
+                    save_directory=out_dir_path,
+                    version=version,
+                    south_inverted=True,  # Use heliospheric community mapping style
+                    overwrite=overwrite,
+                    figure_dpi=300,
+                    dark_mode=dark_mode,
+                )  # Requires L2 or higher level products files
+
+            elif nc_data.getncattr("product") == "L2" and merged_l2_l3:
+                gw_plot_methods.plot_retrieved_B_and_J(
+                    nc2_data=nc_data,
+                    nc2_sorc=each_file,
+                    save_directory=out_dir_path,
+                    version=version,
+                    south_inverted=True,  # Use heliospheric community mapping style
+                    overwrite=overwrite,
+                    figure_dpi=300,
+                    dark_mode=dark_mode,
+                )  # Requires L2 or higher level products files
+
+            else:
+                logger.error(
+                    f"{nc_data.getncattr('product')} misidentified as L2-skipping"
+                )
+
+    elif "l3" in each_file.stem.lower():
+        # TODO Version 2 L3 files do not yet have any much common metadata/attributes.
+        # Grab pipeline version info from corresponding L2 file if it is not yet
+        # incorporated in the supplied product. REMOVE this once ALL product files have
+        # been updated.
+        source_l2 = each_file.as_posix().replace("l3", "l2")
+        try:
+            with Dataset(each_file, mode="r") as l3_data:
+                git_branch = f"{l3_data['Configuration/git_branch'][:]}"
+                git_commit = f"{l3_data['Configuration/git_hash'][:]}"
+        except Exception as exc:
+            logger.warning("Unable to get commit & hash from source L3 file:")
+            logger.warning(f"==> {each_file}")
+            logger.warning(f"Exception was: {exc}")
+            with Dataset(source_l2, mode="r") as l2_data:
+                git_branch = f"{l2_data['Configuration/git_branch'][:]}"
+                git_commit = f"{l2_data['Configuration/git_hash'][:]}"
+        # TODO: Properly categorize exception types that may be encountered here
+        except ValueError:
+            logger.warning("Also unable to get commit & hash from matching L2 file:")
+            logger.warning(f"==> {source_l2}")
+            git_branch = None
+            git_commit = None
+
+        with Dataset(each_file, mode="r") as nc_data:
+            try:
+                nobs = nc_data["l2_data/time_utc"].size
+            except Exception as exc:
+                logger.error(
+                    f"Exception: {exc} field (time_utc) missing in "
+                    f"file {each_file.as_posix()}"
+                )
+                return
+            if nobs < 10:
+                logger.error(
+                    f"Problem file (time={nobs}): {Path(each_file).as_posix()}"
+                )
+                return
+
+            gw_plot_methods.plot_b_1D_maps_with_time(
+                nc_data=nc_data,
+                source=each_file,
+                save_directory=out_dir_path,
+                south_inverted=True,
+                git_branch=git_branch,  # Not yet in L3 product, borrowed from L2
+                git_commit=git_commit,  # Not yet in L3 product, borrowed from L2
+                overwrite=overwrite,
+                dark_mode=dark_mode,
+                figure_dpi=200,
+            )
+
+            # Only Version 3 L3 files currently have this global atrtibute. Hold off
+            # implementation.
+            # if nc_data.getncattr("product") == "L3":
+            #     logger.info(f"Processing L3 file {Path(each_file).name}")
+            # else:
+            #     logger.error(
+            #         f"{nc_data.getncattr('product')} misidentified as L3-skipping"
+            #     )
+
+    spiceypy.kclear()
 
 
 # region cli
@@ -110,6 +315,14 @@ from ezieview.ezvislib.kernel_mgr import spice_kernel_mgr
     default=DFLT_RES,
     help=f"Generate plots at specified DPI rather than default value of {DFLT_RES}",
 )
+@click.option(
+    "-mp",
+    "--multiprocess",
+    # is_flag=True,
+    default=False,
+    type=bool,
+    help="Use a multiprocessing worker pool to process individual orbits in parallel",
+)
 # endregion cli
 def main(
     start_date: datetime.datetime,
@@ -121,6 +334,7 @@ def main(
     overwrite: bool,
     dark_mode: bool,
     figure_dpi: int,
+    multiprocess: bool,
 ) -> int:
     """
     Generate a set of EZIE single-orbit summary plots based on the specified date and
@@ -143,12 +357,12 @@ def main(
     Returns:
         int: 0 on success, 1 if no files were found matching the date specifications.
     """
-    # python3 update_orbit_plots.py \\
-    # Begin - configure logging, log all supplied arguments
     t_bgn = datetime.datetime.now(UTC_TZ)
-    # Using method's default log output folder and log level (INFO)
     start_date = start_date.replace(tzinfo=UTC_TZ)
     stop_date = stop_date.replace(tzinfo=UTC_TZ).replace(hour=23, minute=59, second=59)
+
+    # Configure logging, log all supplied arguments using method's default log output
+    # folder and log level (INFO)
     logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
     logger.info("======= NEW RUN =======")
     context = click.get_current_context()
@@ -198,197 +412,42 @@ def main(
     # 1) SV magnetic coordinates (lat, lon, MLT)
     # 2) Solar subpoint magnetic (and geodetic?) coordinates to correctly orient MLT
     #    plots. Geodetic probably not needed? TBD
-    spk, lsk, pck = spice_kernel_mgr()
-    spiceypy.furnsh([spk.as_posix(), lsk.as_posix(), pck.as_posix()])
 
-    # Diagnostics
-    # count = spiceypy.ktotal("ALL")
-    # logger.info(f"Kernel count after load: {count}")
-    # for i in range(0, count):
-    #     [file, ktype, _source, _handle] = spiceypy.kdata(i, "ALL")
-    #     logger.info(f"File   {file}")
-    #     logger.info(f"Type   {ktype}")
-
-    for each_file in keep_files:
-        prsd = parse_ezie_product_name(each_file)
-        if str(prsd.vrsn) == "nan":
-            logger.error(f"Corrupted file name? {each_file}")
-            continue
-        version = f"{prsd.vrsn}_{prsd.rvsn}"
-
-        if "l1" in each_file.stem.lower():
-            with Dataset(each_file, mode="r") as nc_data:
-                try:
-                    nobs = nc_data.dimensions["ObsRate"].size
-                except Exception as exc:
-                    logger.error(
-                        f"Exception: {exc} obtaining ObsRate in file "
-                        f"{Path(each_file).as_posix()}"
-                    )
-                    continue
-                if nobs < 10:
-                    logger.error(
-                        f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
-                    )
-                    continue
-
-                product = nc_data.getncattr("product")
-                if product == "L1":
-                    logger.info(f"Processing {product} file {Path(each_file).name}")
-                    # Calibration plots requires L1 product file - not populated in L2
-                    # product ATM.
-
-                    # Slice out the time intervals during which we may have had MEM
-                    # observations.
-                    # pass_indices = split_on_science_segments(nc_data)
-                    pass_indices = [[0, -1]]  # When using per-orbit L1 files as inputs
-
-                    for index_pair in pass_indices:
-                        # NOTE: Passing tdiff=True will plot the temperature differences
-                        # from one time step to the next, rather than the current value
-                        # at that timestep (project scientist request).
-                        # for t_diff in [True, False]:
-
-                        for t_diff in [False]:
-                            gw_plot_methods.plot_calibration(
-                                nc_data=nc_data,
-                                source=each_file,
-                                indices=index_pair,
-                                save_directory=out_dir_path,
-                                t_diff=t_diff,
-                                overwrite=overwrite,
-                                dark_mode=dark_mode,
-                                figure_dpi=figure_dpi,
-                            )
-
-                        gw_plot_methods.plot_geolocation(
-                            nc_data=nc_data,
-                            source=each_file,
-                            indices=index_pair,
-                            save_directory=out_dir_path,
-                            overwrite=overwrite,
-                            figure_dpi=figure_dpi,
-                            dark_mode=dark_mode,
-                        )  # Requires L0A or higher level product file
-
-                        gw_plot_methods.plot_ancillary(
-                            nc_data=nc_data,
-                            source=each_file,
-                            indices=index_pair,
-                            save_directory=out_dir_path,
-                            overwrite=overwrite,
-                            figure_dpi=figure_dpi,
-                            dark_mode=dark_mode,
-                        )  # Requires L1 or higher level product files
-
-                else:
-                    logger.error(f"{product} misidentified as L1-skipping")
-
-        elif "l2" in each_file.stem.lower():
-            # NOTE: L2 files are already segmented into individual science passes based
-            # on the algorithm in split_on_science_segments(). No further distinction
-            # needs to be made.
-
-            try:
-                with Dataset(each_file, mode="r") as nc_data:
-                    nobs = nc_data.dimensions["ObsRate"].size
-            except OSError:
-                logger.exception(
-                    f"Unable to open file {Path(each_file).as_posix()}", stack_info=True
+    file_args = []
+    if multiprocess:
+        # Divide cpu count by 2 if you want to be nice to other users/activities.
+        n_process = min(os.cpu_count() // 2, 15)  # max 15 orbits/day, should suffice
+        with multiprocessing.Pool(processes=n_process) as pool:
+            logger.info(f"Distributing jobs to {n_process} processes")
+            # NOTE: Per-process logging is not currenrly supported when multiprocessing
+            # is enabled. Only the main thread entries will be logged.
+            file_args = [
+                (
+                    f,
+                    logger,
+                    out_dir_path,
+                    overwrite,
+                    dark_mode,
+                    figure_dpi,
+                    merged_l2_l3,
                 )
-                continue
+                for f in keep_files
+            ]
+            pool.starmap(func=file_handler, iterable=file_args)
 
-            with Dataset(each_file, mode="r") as nc_data:
-                nobs = nc_data.dimensions["ObsRate"].size
-                if nobs < 10:
-                    logger.error(
-                        f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
-                    )
-                    continue
-                if nc_data.getncattr("product") == "L2" and not merged_l2_l3:
-                    logger.info(f"Processing L2 file {Path(each_file).name}")
-
-                    gw_plot_methods.plot_retrieved_bd_only(
-                        nc_data=nc_data,
-                        source=each_file,
-                        save_directory=out_dir_path,
-                        version=version,
-                        south_inverted=True,  # Use heliospheric community mapping style
-                        overwrite=overwrite,
-                        figure_dpi=300,
-                        dark_mode=dark_mode,
-                    )  # Requires L2 or higher level products files
-
-                elif nc_data.getncattr("product") == "L2" and merged_l2_l3:
-                    gw_plot_methods.plot_retrieved_B_and_J(
-                        nc2_data=nc_data,
-                        nc2_sorc=each_file,
-                        save_directory=out_dir_path,
-                        version=version,
-                        south_inverted=True,  # Use heliospheric community mapping style
-                        overwrite=overwrite,
-                        figure_dpi=300,
-                        dark_mode=dark_mode,
-                    )  # Requires L2 or higher level products files
-
-                else:
-                    logger.error(
-                        f"{nc_data.getncattr('product')} misidentified as L2-skipping"
-                    )
-
-        elif "l3" in each_file.stem.lower():
-            # TODO L3 files do not yet have any of the common metadata or variables?
-            # Grab pipeline version info fromm corresponding L2 file as it is not yet
-            # incorporated in this product level. REMOVE once product files have been
-            # updated.
-            source_l2 = each_file.as_posix().replace("l3", "l2")
-            try:
-                with Dataset(source_l2, mode="r") as l2_data:
-                    git_branch = f"{l2_data['Configuration/git_branch'][:]}"
-                    git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-            except Exception as exc:
-                logger.warning("Unable to get commit & hash from source L2 file:")
-                logger.warning(f"==> {source_l2}")
-                logger.warning(f"Exception was: {exc}")
-                git_branch = None
-                git_commit = None
-
-            with Dataset(each_file, mode="r") as nc_data:
-                try:
-                    nobs = nc_data["l2_data/time_utc"].size
-                except Exception as exc:
-                    logger.error(
-                        f"Exception: {exc} field (time_utc) missing in "
-                        f"file {each_file.as_posix()}"
-                    )
-                    continue
-                if nobs < 10:
-                    logger.error(
-                        f"Problem file (time={nobs}): {Path(each_file).as_posix()}"
-                    )
-                    continue
-                gw_plot_methods.plot_b_1D_maps_with_time(
-                    nc_data=nc_data,
-                    source=each_file,
-                    save_directory=out_dir_path,
-                    south_inverted=True,
-                    git_branch=git_branch,  # Not yet in L3 product, borrowed from L2
-                    git_commit=git_commit,  # Not yet in L3 product, borrowed from L2
-                    overwrite=overwrite,
-                    dark_mode=dark_mode,
-                    figure_dpi=200,
-                )
-
-                # L3 files do not yet have any of the common metadata or variables.
-                # if nc_data.getncattr("product") == "L3":
-                #     logger.info(f"Processing L3 file {Path(each_file).name}")
-                # else:
-                #     logger.error(
-                #         f"{nc_data.getncattr('product')} misidentified as L3-skipping"
-                #     )
+    else:
+        for each_file in keep_files:
+            file_handler(
+                each_file=each_file,
+                logger=logger,
+                out_dir_path=out_dir_path,
+                overwrite=overwrite,
+                dark_mode=dark_mode,
+                figure_dpi=figure_dpi,
+                merged_l2_l3=merged_l2_l3,
+            )
 
     # Finished - log elapsed execution time
-    spiceypy.kclear()
     t_end = datetime.datetime.now(UTC_TZ)
     logger.info(f"Elapsed time (seconds): {(t_end - t_bgn).total_seconds():7.3f}")
     return 0
