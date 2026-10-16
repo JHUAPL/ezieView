@@ -81,7 +81,6 @@ from ezieview.ezvislib.gw_plot_utils import (
 # endregion imports
 
 mpl.use("Agg")
-logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
 
 
 def plot_mlt_sza_coverage(
@@ -544,7 +543,7 @@ def plot_daily_maps(
                             )
 
                         # TODO: Speed up plotting of maps. Are the calculations or the
-                        # rendering the bottlenck? TBD
+                        # rendering the bottleneck? TBD
                         if "mem-observation" in ptype:  # plot MEM footprint[s]
                             all_axs[sndx].plot(
                                 MLT_sign * xcrd[scuse & rguse],
@@ -1192,4 +1191,5 @@ def main(
 
 
 if __name__ == "__main__":
+    logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
     main(max_content_width=120)
