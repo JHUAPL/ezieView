@@ -169,59 +169,6 @@ def split_on_science_segments(
     return _segments_from_flags(obs_flg, obs_max)
 
 
-def extract_science_passes(nc_data: Dataset):
-    """
-    For products that require separation of full-day files into individual science
-    passes, break up observations into pairs of indices that start and finish at
-    observation gap edges. Until we get actual orbit numbers, these will serve as a
-    proxy for orbit boundaries.
-
-    NOTE: This has been superseded by split_on_science_segments() above for L1 file
-    processing, which uses the acquisition_mode flag from the L1 file to better bracket
-    science passes. The L2 files do not yet have that flag, but have already been split
-    into individual science passes based on that algorithm.
-
-    Args:
-        nc_data (Dataset): Open netCDF4 Dataset of the full-day product to
-            segment.
-
-    Returns:
-        list of 2-tuples: Bracketing what we believe are "good" observation intervals.
-    """
-    timevals = nc_data["Time/time_tai"][:]
-    timediff = np.diff(timevals)
-    timejump = timediff > 1.0e3
-    timerang = [
-        0,
-        *[int(x) for x in np.argwhere(timejump).flatten()],
-        len(timevals),
-    ]
-    # Break up observations into pairs of indices that start and finish at gap edges.
-    index_pairs = []
-    for tt, t0 in enumerate(timerang[:-1]):
-        t1 = timerang[tt + 1]
-        i0, i1 = t0 + 1, t1 - 1  # Avoid gap indices themselves
-        # Extract subrange where all MEM's have been geolocated
-        mem_good = (
-            (~np.isnan(nc_data["Geolocation/obs_lat1"][i0:i1]))
-            & (~np.isnan(nc_data["Geolocation/obs_lat2"][i0:i1]))
-            & (~np.isnan(nc_data["Geolocation/obs_lat3"][i0:i1]))
-            & (~np.isnan(nc_data["Geolocation/obs_lat4"][i0:i1]))
-        )
-        if np.sum(mem_good) > 0:
-            i0 += np.argmax(mem_good)
-            i1 -= np.argmax(mem_good[::-1])
-            # Trim off timesteps where we're slewing at start of observation
-            i0 += 6
-            # i1 -= 6  # Necessary at end of pass as well? TBD
-            index_pairs.append((int(i0), int(i1)))
-    # Return pairs bracketing what we believe are "good" observation intervals.
-    if len(index_pairs) == 0:
-        # KLUDGE to make partial L0B w/missing timestamps at start process properly
-        logger.info("KLUDGE invoked-remove after processing partial L0B file!")
-        index_pairs = [(91, timerang[-1])]
-    return index_pairs
-
 
 def jpl_safe_datetime(
     datestr: str,
@@ -1209,18 +1156,6 @@ def magnetic_parallel(
         return geo_lat[srt_ndx], geo_lon[srt_ndx]
 
 
-def get_north_magnetic_pole(year4mag: float):
-    """
-    Compute location of north magnetic pole using APEX magnetic coordinate model's
-    qd2geo method.
-
-    Args:
-        year4mag (float): Decimal year for which pole location should be computed
-
-    Returns:
-        tuple(float,float): Geodetic latitude of pole, geodetic longitude of pole
-    """
-    return Apex(date=year4mag, refh=0).qd2geo(+90, 0, 0)
 
 
 def plot_geomagnetic_references(
@@ -1296,23 +1231,6 @@ def plot_geomagnetic_references(
         )
     return mag_lat_artist
 
-
-def read_png_metadata(filename: Path | str):
-    """
-    Read PNG metadata using PIL/Pillow
-
-    Args:
-        filename (Path | str): Path to a PNG image
-
-    Returns:
-        dict: Dictionary containing any text fields found in the PNG file's metadata
-    """
-
-    img = Image.open(filename)
-    metadata = {}
-    if hasattr(img, "text"):  # Get all text chunks
-        metadata = img.text
-    return metadata
 
 
 def hash_ezie_data_product(source: str | Path):
