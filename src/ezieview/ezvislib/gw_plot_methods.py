@@ -9,6 +9,7 @@ import datetime
 import logging
 import time
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import cartopy.crs as ccrs
@@ -101,6 +102,123 @@ MEM_BEAM_DIAGRAM_PATH = (
     # Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
 )
 # endregion
+
+
+@dataclass
+class L3PassData:
+    """
+    Data arrays extracted from a single L3 product file (and its embedded L2
+    data group), sufficient to render an L3 map and related overlays.
+
+    Attributes:
+        time_utc: Observation times as timezone-aware UTC datetimes.
+        midpt: Midpoint index into time_utc used to orient the map.
+        lat_at_midpt: Spacecraft geodetic latitude at the midpoint.
+        lon_at_midpt: Spacecraft geodetic longitude at the midpoint.
+        lat_mesh: 2-D latitude mesh of the L3 grid.
+        lon_mesh: 2-D longitude mesh of the L3 grid.
+        model_B: Modeled B field on the L3 grid (reshaped to lat_mesh.shape).
+        Je: East current density on the L3 grid.
+        Jn: North current density on the L3 grid.
+        lats: L2 observation geodetic latitudes (4 MEM x n_obs).
+        lons: L2 observation geodetic longitudes (4 MEM x n_obs).
+        obs_B: Observed (L2) B field along the MEM footprints.
+        algorithm: "down" or "mag", per the L2 product's B field variant
+            (None if no recognizable B variant is present).
+    """
+
+    time_utc: np.ndarray
+    midpt: int
+    lat_at_midpt: float
+    lon_at_midpt: float
+    lat_mesh: np.ndarray
+    lon_mesh: np.ndarray
+    model_B: np.ndarray
+    Je: np.ndarray
+    Jn: np.ndarray
+    lats: np.ndarray
+    lons: np.ndarray
+    obs_B: np.ndarray
+    algorithm: str | None
+
+
+def _load_l3_pass(nc3: Dataset) -> L3PassData:
+    """
+    Extract the L3 (and embedded L2) data arrays needed for L3 mapping from an
+    open L3 Dataset.
+
+    Args:
+        nc3 (Dataset): Open netCDF4 Dataset of the L3 product file.
+
+    Returns:
+        L3PassData: The extracted arrays and derived midpoint quantities.
+
+    Raises:
+        TypeError: If the L3 file's time field does not contain
+            datetime.datetime or np.datetime64 objects.
+    """
+    time_utc = np.array(
+        [datetime.datetime.fromisoformat(_) for _ in nc3["/l2_data/time_utc"][:]]
+    )
+    if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
+        raise TypeError(
+            "obs_time must contain datetime.datetime or np.datetime64 objects."
+        )
+
+    # Use midpoint to select map orientation
+    midpt = len(time_utc) // 2
+    lat_at_midpt = nc3["l2_data/sc_lat"][midpt]
+    lon_at_midpt = nc3["l2_data/sc_lon"][midpt]
+
+    # Grab J, B, and coordinate data arrays
+    lat_mesh = nc3["/l3_data/lat"][:]
+    lon_mesh = nc3["/l3_data/lon"][:]
+    model_B = nc3["/l3_data/Bd_geod_80"][:]
+    Je = nc3["/l3_data/Je_110"][:]
+    Jn = nc3["/l3_data/Jn_110"][:]
+    lats = nc3["/l2_data/lat"][:]
+    lons = nc3["/l2_data/lon"][:]
+    l2grp = nc3.groups["l2_data"]
+    if "Bd_geod_80" in l2grp.variables:  # NEW format
+        obs_B = nc3["/l2_data/Bd_geod_80"][:]
+        algorithm = "down"
+    elif "Bmag_80" in l2grp.variables:  # NEW format
+        obs_B = nc3["/l2_data/Bmag_80"][:]
+        algorithm = "mag"
+    else:  # No recognizable B field variant in this L2 group
+        obs_B = np.array([])
+        algorithm = None
+    model_B = model_B.reshape(lat_mesh.shape)
+
+    return L3PassData(
+        time_utc=time_utc,
+        midpt=midpt,
+        lat_at_midpt=lat_at_midpt,
+        lon_at_midpt=lon_at_midpt,
+        lat_mesh=lat_mesh,
+        lon_mesh=lon_mesh,
+        model_B=model_B,
+        Je=Je,
+        Jn=Jn,
+        lats=lats,
+        lons=lons,
+        obs_B=obs_B,
+        algorithm=algorithm,
+    )
+
+
+def _l3_source_from_l2(l2_sorc: Path) -> Path:
+    """
+    Derive the corresponding L3 product path from an L2 product path by
+    replacing the product-level token in the file name (not any "l2"
+    substring in directory names).
+    """
+    parts = l2_sorc.name.split("_")
+    if len(parts) >= 2 and parts[1].lower() == "l2":
+        parts[1] = "l3"
+        return l2_sorc.with_name("_".join(parts))
+    # Fallback for nonstandard names: legacy full-path substitution.
+    return Path(l2_sorc.as_posix().replace("l2", "l3"))
 
 
 def _apply_dark_mode(dark_mode: bool) -> None:
@@ -1255,7 +1373,7 @@ def plot_calibration(
             tstmp=t_stamp,
             overwrite=overwrite,
         ) is None:
-            return
+            continue
 
         fig, axs = plt.subplots(
             num_rows + 1,
@@ -1274,7 +1392,7 @@ def plot_calibration(
                         vmin, vmax = -40, +40
             else:
                 match stokes[col].upper():
-                    case "H" | "V" | "S3":
+                    case "H" | "V":
                         vmin, vmax = -25, +25
                     case "S3" | "S4":
                         vmin, vmax = -50, +50
@@ -2197,22 +2315,12 @@ def map_sc_mem_footprints_magnetic(
 
 def l3_map(
     l3_map_axs: GeoAxes,
-    time_utc: np.ndarray,
-    lons: np.ndarray,
-    lon_mesh: np.ndarray,
-    lats: np.ndarray,
-    lat_mesh: np.ndarray,
+    l3_data: L3PassData,
     lats_m: np.ndarray,
-    Jn: np.ndarray,
-    Je: np.ndarray,
-    model_B: np.ndarray,
-    obs_B: np.ndarray,
     fig: plt.figure,
     hemisphere: str,
-    algorithm: str,
     MLT_sign: int,
-    midpt: int,
-    sun_geo_lon_mid: datetime.datetime,
+    sun_geo_lon_mid: float,
     map_proj: ccrs.Projection,
     south_inverted: bool = False,
     dark_mode: bool = False,
@@ -2222,24 +2330,16 @@ def l3_map(
     """Plot a map of modeled and observed dB and current values on the supplied axis.
 
     Args:
-        l3_map_axs (GeoAxes): _description_
-        time_utc (np.ndarray): _description_
-        lons (np.ndarray): _description_
-        lon_mesh (np.ndarray): _description_
-        lats (np.ndarray): _description_
-        lat_mesh (np.ndarray): _description_
-        lats_m (np.ndarray): _description_
-        Jn (np.ndarray): _description_
-        Je (np.ndarray): _description_
-        model_B (np.ndarray): _description_
-        obs_B (np.ndarray): _description_
-        fig (plt.figure): _description_
-        hemisphere (str): _description_
-        algorithm (str): _description_
-        MLT_sign (int): _description_
-        midpt (int): _description_
-        sun_geo_lon_mid (datetime.datetime): _description_
-        map_proj (ccrs.Projection): _description_
+        l3_map_axs (GeoAxes): Cartopy axes on which to draw the L3 map.
+        l3_data (L3PassData): Arrays extracted from the L3 product (and its
+            embedded L2 group) for this pass.
+        lats_m (np.ndarray): Magnetic latitudes at which to overlay parallels.
+        fig (plt.figure): Parent figure (used for the color bar).
+        hemisphere (str): NORTH or SOUTH (or None for an EEJ pass).
+        MLT_sign (int): MLT sign multiplier (+1, or -1 for south-inverted).
+        sun_geo_lon_mid (float): Subsolar geodetic longitude (degrees) at the
+            pass midpoint.
+        map_proj (ccrs.Projection): Cartopy projection of the map axes.
         south_inverted (bool, optional): Invert the southern hemisphere MLT
             axis (heliospheric community mapping style). Defaults to False.
         dark_mode (bool, optional): Generate plots using 'dark mode' format.
@@ -2252,9 +2352,19 @@ def l3_map(
     Returns:
         None
     """
-    # TODO: Complete docstring descriptions, and perhaps move some of the L3 processing
-    #       from the calling routines to this method?
     # TODO: Test this on EEJ passes. It's probably missing something.
+
+    # Unpack the pass arrays for use throughout this method.
+    time_utc = l3_data.time_utc
+    lons = l3_data.lons
+    lon_mesh = l3_data.lon_mesh
+    lats = l3_data.lats
+    lat_mesh = l3_data.lat_mesh
+    Jn = l3_data.Jn
+    Je = l3_data.Je
+    model_B = l3_data.model_B
+    obs_B = l3_data.obs_B
+    midpt = l3_data.midpt
 
     # Set extent
     swath_wid, swath_len = 3250000, 3250000  # meters, keep it square
@@ -2269,8 +2379,9 @@ def l3_map(
     elif hemisphere == SOUTH:
         ext_shift = 0.3 * (-90 - latmid)
         b_sign_mod = -1
-    else:
+    else:  # EEJ pass
         ext_shift = 0.0
+        b_sign_mod = +1
 
     x0_m, y0_m = map_proj.transform_point(
         lonmid, latmid + ext_shift, src_crs=DATA_TRANSFORM
@@ -2602,25 +2713,17 @@ def plot_b_1D_maps_with_time(
         return
 
     try:
-        time_utc = np.array(
-            [
-                datetime.datetime.fromisoformat(_)
-                for _ in nc_data["/l2_data/time_utc"][:]
-            ]
-        )
+        l3_data = _load_l3_pass(nc_data)
+    except TypeError:
+        raise
     except Exception as exc:
         logger.error(f"Encountered exception while processing L3 file: {exc}")
         return
 
-    if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
-        raise TypeError(
-            "obs_time must contain datetime.datetime or np.datetime64 objects."
-        )
-
-    # Use midpoint to select map orientation
-    midpt = len(time_utc) // 2
-    lat_at_midpt = nc_data["l2_data/sc_lat"][midpt]
-    lon_at_midpt = nc_data["l2_data/sc_lon"][midpt]
+    time_utc = l3_data.time_utc
+    midpt = l3_data.midpt
+    lat_at_midpt = l3_data.lat_at_midpt
+    lon_at_midpt = l3_data.lon_at_midpt
 
     # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
     # gridlines, play with the map projection as needed.
@@ -2629,24 +2732,9 @@ def plot_b_1D_maps_with_time(
         logger.warning(f"L3 file appears to contain EEJ pass, skipping: {source.name}")
         return
 
-    # Grab J, B, and coordinate data arrays
-    lat_mesh = nc_data["/l3_data/lat"][:]
-    lon_mesh = nc_data["/l3_data/lon"][:]
-    model_B = nc_data["/l3_data/Bd_geod_80"][:]
-    Je = nc_data["/l3_data/Je_110"][:]
-    Jn = nc_data["/l3_data/Jn_110"][:]
-    lats = nc_data["/l2_data/lat"][:]
-    lons = nc_data["/l2_data/lon"][:]
-    l2grp = nc_data.groups["l2_data"]
-    if "Bd_geod_80" in l2grp.variables:  # NEW format
-        obs_B = nc_data["/l2_data/Bd_geod_80"][:]
-        algorithm = "down"
-    elif "Bmag_80" in l2grp.variables:  # NEW format
-        obs_B = nc_data["/l2_data/Bmag_80"][:]
-        algorithm = "mag"
-    model_B = model_B.reshape(lat_mesh.shape)
-
-    if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
+    if np.all(l3_data.Jn == 0.0) and np.all(l3_data.Je == 0.0) and np.all(
+        l3_data.obs_B == 0.0
+    ):
         logger.warning(
             f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
         )
@@ -2685,21 +2773,11 @@ def plot_b_1D_maps_with_time(
 
     l3_map(
         l3_map_axs=l3_map_axs,
-        time_utc=time_utc,
-        lons=lons,
-        lon_mesh=lon_mesh,
-        lats=lats,
-        lat_mesh=lat_mesh,
+        l3_data=l3_data,
         lats_m=lats_m,
-        Jn=Jn,
-        Je=Je,
-        model_B=model_B,
-        obs_B=obs_B,
         fig=fig,
         hemisphere=hemisphere,
-        algorithm=algorithm,
         MLT_sign=MLT_sign,
-        midpt=midpt,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=False,
@@ -2780,10 +2858,10 @@ def plot_retrieved_B_and_J(
     Plot the retrieved B field (L2) together with the derived current (J)
     vectors (L3) on a combined map.
 
-    The L3 source file is derived from the L2 source by substituting "l2" for
-    "l3" in the file name. Shows the model and observed B fields and the
-    retrieved currents, with MEM footprints, magnetic reference grids, and MLT
-    labels.
+    The L3 source file is derived from the L2 source by substituting the "l2"
+    product token for "l3" in the file name. Shows the model and observed B
+    fields and the retrieved currents, with MEM footprints, magnetic reference
+    grids, and MLT labels.
 
     Args:
         nc2_data (Dataset): Open netCDF4 Dataset of the L2 product file to
@@ -2817,7 +2895,7 @@ def plot_retrieved_B_and_J(
     # mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
     #     Defaults to "Uncorrected".
 
-    nc3_sorc: Path = Path(nc2_sorc.as_posix().replace("l2", "l3"))
+    nc3_sorc: Path = _l3_source_from_l2(nc2_sorc)
     if not nc3_sorc.exists():
         logger.error(
             f"L3 corresponding to supplied L2 absent, skipping: {nc3_sorc.as_posix()}"
@@ -2931,25 +3009,22 @@ def plot_retrieved_B_and_J(
 
     with Dataset(nc3_sorc, mode="r") as nc3_data:
         try:
-            time_utc = np.array(
-                [
-                    datetime.datetime.fromisoformat(_)
-                    for _ in nc3_data["/l2_data/time_utc"][:]
-                ]
-            )
+            l3_data = _load_l3_pass(nc3_data)
+        except TypeError:
+            raise
         except Exception as exc:
             logger.error(f"Encountered exception while processing L3 file: {exc}")
             return
 
-        if not isinstance(time_utc[0], (datetime.datetime, np.datetime64)):
-            raise TypeError(
-                "obs_time must contain datetime.datetime or np.datetime64 objects."
-            )
-
-        # Use midpoint to select map orientation
-        midpt = len(time_utc) // 2
-        lat_at_midpt = nc3_data["l2_data/sc_lat"][midpt]
-        lon_at_midpt = nc3_data["l2_data/sc_lon"][midpt]
+        time_utc = l3_data.time_utc
+        midpt = l3_data.midpt
+        lat_at_midpt = l3_data.lat_at_midpt
+        lon_at_midpt = l3_data.lon_at_midpt
+        lons = l3_data.lons
+        lats = l3_data.lats
+        lat_mesh = l3_data.lat_mesh
+        lon_mesh = l3_data.lon_mesh
+        model_B = l3_data.model_B
 
         # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
         # gridlines, play with the map projection as needed.
@@ -2960,24 +3035,12 @@ def plot_retrieved_B_and_J(
             )
             return
 
-        # Grab J, B, and coordinate data arrays
-        lat_mesh = nc3_data["/l3_data/lat"][:]
-        lon_mesh = nc3_data["/l3_data/lon"][:]
-        model_B = nc3_data["/l3_data/Bd_geod_80"][:]
-        Je = nc3_data["/l3_data/Je_110"][:]
-        Jn = nc3_data["/l3_data/Jn_110"][:]
-        lats = nc3_data["/l2_data/lat"][:]
-        lons = nc3_data["/l2_data/lon"][:]
-        l2grp = nc3_data.groups["l2_data"]
-        if "Bd_geod_80" in l2grp.variables:  # NEW format
-            obs_B = nc3_data["/l2_data/Bd_geod_80"][:]
-            algorithm = "down"
-        elif "Bmag_80" in l2grp.variables:  # NEW format
-            obs_B = nc3_data["/l2_data/Bmag_80"][:]
-            algorithm = "mag"
-        model_B = model_B.reshape(lat_mesh.shape)
+    if l3_data.algorithm is not None:
+        algorithm = l3_data.algorithm
 
-    if np.all(Jn == 0.0) and np.all(Je == 0.0) and np.all(obs_B == 0.0):
+    if np.all(l3_data.Jn == 0.0) and np.all(l3_data.Je == 0.0) and np.all(
+        l3_data.obs_B == 0.0
+    ):
         logger.warning(
             f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
         )
@@ -3026,21 +3089,11 @@ def plot_retrieved_B_and_J(
 
     l3_map(
         l3_map_axs=l3_map_axs,
-        time_utc=time_utc,
-        lons=lons,
-        lon_mesh=lon_mesh,
-        lats=lats,
-        lat_mesh=lat_mesh,
+        l3_data=l3_data,
         lats_m=lats_m,
-        Jn=Jn,
-        Je=Je,
-        model_B=model_B,
-        obs_B=obs_B,
         fig=fig,
         hemisphere=hemisphere,
-        algorithm=algorithm,
         MLT_sign=MLT_sign,
-        midpt=midpt,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=False,
@@ -3505,14 +3558,16 @@ def ingest_full_day_all_sv(
                         )
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
-                        date_dict[prsd.spcv][prsd.orbt][dbvar] = None
+                        date_dict[prsd.spcv][prsd.orbt] = None
             except Exception as exc:
                 logger.error(f"Unrecoverable problem, skipping file: {exc}")
-                date_dict[prsd.spcv][prsd.orbt][dbvar] = None
+                date_dict[prsd.spcv][prsd.orbt] = None
 
     # Combine entries from each SV/L1 file into single unified dictionary
     for sv_dict in date_dict.values():
         for orb_dict in sv_dict.values():
+            if orb_dict is None:  # This orbit failed to ingest; skip it
+                continue
             if "SpaceVehicle" not in full_day:
                 full_day["SpaceVehicle"] = []
             if orb_dict["SpaceVehicle"] is not None:
@@ -3530,13 +3585,10 @@ def ingest_full_day_all_sv(
                     )
 
     # Recast each dictionary value (list) as a numpy array
-    for sv_dict in date_dict.values():
-        for orb_dict in sv_dict.values():
-            for dbvar in coverage_db_list:
-                full_key = dbvar.split("/")[-1]  # Use only variable name, not group
-                full_day[full_key] = np.array(full_day[full_key])
-            full_key = "SpaceVehicle"
-            full_day[full_key] = np.array(full_day[full_key])
+    for dbvar in coverage_db_list:
+        full_key = dbvar.split("/")[-1]  # Use only variable name, not group
+        full_day[full_key] = np.array(full_day[full_key])
+    full_day["SpaceVehicle"] = np.array(full_day["SpaceVehicle"])
 
     # FIXME: Not in .nc4 files! Borrowing MEM 1.
     # FIXME: Have these added to netcdf products? Otherwise must compute w/SPICE _here_.
