@@ -11,6 +11,7 @@ and figure naming/saving helpers shared by the gw_* plotting routines.
 import collections
 import datetime
 import functools
+import hashlib
 import logging
 import math
 import os
@@ -24,7 +25,6 @@ import matplotlib as mpl
 import matplotlib.dates as mdate
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
-import netCDF4
 import numpy as np
 from apexpy import Apex
 from netCDF4 import Dataset
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 def split_on_calibration_segments(
-    nc_data: netCDF4.Dataset,
+    nc_data: Dataset,
 ):
     """
     Build table of observations where the MEM acquisition mode flag is set to
@@ -99,7 +99,7 @@ def split_on_calibration_segments(
 
 
 def split_on_science_segments(
-    nc_data: netCDF4.Dataset,
+    nc_data: Dataset,
 ):
     """
     Build table of observations where at least one MEM intersects the Earth and the
@@ -167,7 +167,7 @@ def split_on_science_segments(
     return seg_lst
 
 
-def extract_science_passes(nc_data: netCDF4.Dataset):
+def extract_science_passes(nc_data: Dataset):
     """
     For products that require separation of full-day files into individual science
     passes, break up observations into pairs of indices that start and finish at
@@ -285,11 +285,11 @@ def parse_ezie_product_name(source: str | Path):
     # that includes the orbit number.
     if "l1" in stem and "orbit" in source.as_posix():
         pattern = (
-            "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})_(\\d{6})"
+            "^ezie_([a-zA-Z0-9]{2,3})_(\\d{8})_(\\d{6})_(\\d{6})"
             "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
         )
         match = re.compile(pattern).search(stem)
-        if hasattr(match, "group"):
+        if match is not None:
             parsed = {
                 "prod": match.group(1),
                 "date": match.group(2),
@@ -304,13 +304,13 @@ def parse_ezie_product_name(source: str | Path):
             }
     else:
         pattern = (
-            "^ezie_([a-zA-z0-9]{2,3})_(\\d{8})_(\\d{6})"
+            "^ezie_([a-zA-Z0-9]{2,3})_(\\d{8})_(\\d{6})"
             "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
         )
         match = re.compile(pattern).search(stem)
         if match is None:
             logger.warning(f"Anomalous file name: {source_as_path.as_posix()}")
-        elif hasattr(match, "group"):
+        else:
             # JPL sent us a file with seconds=60?
             logger.debug(f"File name: {source_as_path.as_posix()}")
             logger.debug(
@@ -733,15 +733,6 @@ def convert_to_mag(
         return type(geom)(list(convert_to_mag_doer(geom.coords, year4mag, alt4mag)))
     elif geom.geom_type == "Polygon":
         raise RuntimeError("Polygon case not yet supported")
-        logger.debug("Converting polygonal feature from geodetic to magnetic coords")
-        ring = geom.exterior
-        shell = type(ring)(list(convert_to_mag_doer(ring.coords, year4mag, alt4mag)))
-        holes = list(geom.interiors)
-        for pos, ring in enumerate(holes):
-            holes[pos] = type(ring)(
-                list(convert_to_mag_doer(ring.coords, year4mag, alt4mag))
-            )
-        return type(geom)(shell, holes)
     elif geom.geom_type.startswith("Multi") or geom.geom_type == "GeometryCollection":
         # Recursive call
         logger.debug("Converting geometry collection from geodetic to magnetic coords")
@@ -935,9 +926,7 @@ def map_magnetic_continents(
     """
 
     # This will return cached results if the arguments are the same as a previous call.
-    continents_mag = _magnetic_continents(
-        int(time4mag.year), alt4mag=REFERENCE_ALTITUDE_KM
-    )
+    continents_mag = _magnetic_continents(int(time4mag.year), alt4mag=alt4mag)
 
     # Convert magnetic longitudes to MLT and then plot features.
     # When run at 50M resolution instead of 110, the following error is encountered:
@@ -1228,9 +1217,8 @@ def magnetic_parallel(
         tuple(np.ndarray, np.ndarray): Geographic latitude and longitude
             vectors of the parallel, sorted by longitude.
     """
-    res_deg = 1.0  # make keyword?
+    res_deg = 1.0
     mag_lon = np.arange(-180.0, 180.0, res_deg)
-    _tmp_lat = np.full_like(mag_lon, mag_lat)
     geo_lat, geo_lon, _err_deg = Apex(date=year, refh=alt).apex2geo(
         mag_lat,
         mag_lon,
@@ -1276,7 +1264,7 @@ def plot_geomagnetic_references(
 
     Args:
         ax (plt.Axes): Plot axes on which to draw the specified markings.
-        at_time (float):  Datetime for which magnetic model is computed.
+        at_time (datetime.datetime): Datetime for which magnetic model is computed.
         latitudes (list[float] | None, optional): Parallel latitudes. Defaults to None.
         south_inverted (bool, optional): Plot southern hemisphere as if looking down
             through earth from above north pole. Defaults to False.
@@ -1312,7 +1300,7 @@ def plot_geomagnetic_references(
                 transform=ccrs.PlateCarree(),
             )[0]
     else:  # Just mark magnetic poles (tilted dipole approximation)
-        plt.text(
+        ax.text(
             np.degrees(n_mag_pole_lon),
             np.degrees(n_mag_pole_lat),
             "N",
@@ -1322,7 +1310,7 @@ def plot_geomagnetic_references(
             va="center",
             transform=ccrs.PlateCarree(),
         )
-        plt.text(
+        ax.text(
             (180.0 + MLT_sign * np.degrees(n_mag_pole_lon)) % 360.0,
             -1.0 * np.degrees(n_mag_pole_lat),
             "S",
@@ -1366,8 +1354,6 @@ def hash_ezie_data_product(source: str | Path):
     Returns:
         str: Hexadecimal MD5 digest of the file contents.
     """
-    import hashlib
-
     with open(source, "rb") as fp:
         return hashlib.file_digest(fp, "md5").hexdigest()
 
