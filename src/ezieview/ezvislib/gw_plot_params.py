@@ -2,9 +2,8 @@
 Shared constants for the EZIE science gateway plotting codes.
 
 Defines physical constants, plot sizing/resolution/color parameters, region
-definitions and bounds, spacecraft and MEM identifiers, and data product level
-strings used by both the gateway plotting routines (gw_*.py) and the
-update_*_plots.py scripts.
+definitions and bounds, and spacecraft and MEM identifiers used by both the
+gateway plotting routines (gw_*.py) and the update_*_plots.py scripts.
 """
 
 import datetime
@@ -45,19 +44,13 @@ O2_CTR_FREQ_MHZ = 118.750e3
 
 # ===== Date-related parameters =======================================================
 UTC_TZ = datetime.UTC
-DATE_NOW = datetime.datetime.now(UTC_TZ)
-YEAR_NOW_INT = int(DATE_NOW.strftime("%Y"))
 CLI_DATE_FORMAT = "%Y-%m-%d"  # For specifying date range on command line
 EZIE_DATE_FORMAT = "%Y%m%d"  # Date format used in EZIE product filenames
-SEC_PER_DAY = 24 * 60 * 60
 
 # ===== Plot generation parameters ====================================================
 DEFAULT_FIG_SIZE = (16, 10)  # Landscape
 ALTERNATE_FIG_SIZE = (16, 7)  # Short Landscape
-GLOBAL_FIG_SIZE = (16, 15)  # Short Landscape
-PORTRAIT_FIG_SIZE = (8.5, 11)
 DFLT_RES = 100  # DPI
-HIGH_RES = 300  # DPI, better suited for print, presentations, or "eye plot" charts
 
 TERMINATOR_ALPHA = 0.25
 TERMINATOR_COLOR = "#000044"
@@ -95,18 +88,15 @@ EQUATORIAL = "Equatorial"
 NORTH = "North"
 REGIONS = [NORTH, EQUATORIAL, SOUTH]
 # TODO: Standardize these between various plot methods and remove redundancies
-BOUNDS = {}  # Must be [Lower, Upper]!
-BOUNDS[NORTH] = [+45.0, +90.0]
-BOUNDS[EQUATORIAL] = [-40.0, +40.0]
-BOUNDS[SOUTH] = [-90.0, -45.0]
+BOUNDS = {  # Must be [Lower, Upper]!
+    NORTH: [+45.0, +90.0],
+    EQUATORIAL: [-40.0, +40.0],
+    SOUTH: [-90.0, -45.0],
+}
 GEO_LAT_LOWER_LIMIT = 40.0
 MAG_LAT_LOWER_LIMIT = 40.0
 
 SAT_COL = "#FF800E"  # From colorblind-friendly palette
-
-# Attitude plot parameters
-CAR_CMP_NAM = ["X", "Y", "Z"]
-LINTHRESH = 1.0e-3  # Bound for linear region near zero in SymLogNorm plots
 
 # MEM plotting parameters
 MEM_NUMBERS = [1, 2, 3, 4]  # handle switch from 0..3 and 1..4, indexing vs naming
@@ -119,14 +109,6 @@ MEM_CLR = [
     "crimson",  #    MEM3 - negative angle from nadir
     "dodgerblue",  # MEM4 - positive angle from nadir
 ]  # Easier to differentiate than "Default" red-green-blue-orange
-# MEM_CLR = ["blue", "red", "green", "orange"]  # Default
-MEM_CB_CLR = [
-    "C4",  # MEM1 - Cerulean/Blue
-    "C5",  # MEM2 - Tenne (Tawny)/Orange
-    "C9",  # MEM3 - Very Light Grey/Grey
-    "C8",  # MEM4 - Macaroni and Cheese/Orange
-]  # Uses colors from tableau-colorblind10 for accessibility.
-# C0 and C1 are used elsewhere for plotting.
 
 # TODO: What angles and/or reference frames preferred here? Update to use JPL standard?
 MEM_LOOK_DIRECTIONS = [
@@ -139,7 +121,6 @@ MEM_LOOK_DIRECTIONS = [
 
 EARTHLOOK = "EARTHLOOK"
 SKYLOOK = "SKYLOOK"
-OBSERVATION_MODES = [EARTHLOOK, SKYLOOK]
 
 # Retrieved and background B field plotting parameters
 BN = "B$_N$"
@@ -152,27 +133,3 @@ NUM_FLD = len(FLD_CMP)
 TOT_MOD = "Total"
 DBS_MOD = "dBs"
 FLD_MODES = [TOT_MOD, DBS_MOD]
-
-# Potential data product types/levels. Exact flight data product species still TBD.
-L0A = "l0a"
-L0B = "l0b"
-L0 = "l0"
-L1 = "l1"
-L2 = "l2"
-L3 = "l3"
-
-# We'll match patterns in the order below, so:
-# 1) Keep L0A and L0B _before_ L0
-LEVELS = [
-    L0A,
-    L0B,
-    L0,
-    L1,
-    L2,
-    L3,
-]
-
-# Quantities we (used to) have to calculate from netcdf variables
-GEO_MAG = "S/C Geomagnetic"
-MEM_MAG = "MEM Geomagnetic"
-MEM_SZA = "MEM Solar Zenith Angle"
