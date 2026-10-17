@@ -8,7 +8,6 @@ and figure naming/saving helpers shared by the gw_* plotting routines.
 """
 
 # region imports
-import collections
 import datetime
 import functools
 import hashlib
@@ -17,6 +16,7 @@ import math
 import os
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cartopy.crs as ccrs
@@ -38,6 +38,38 @@ from ezieview.ezvislib.gw_plot_params import DFLT_RES, REFERENCE_ALTITUDE_KM
 logger = logging.getLogger(__name__)
 
 # endregion
+
+
+def _segments_from_flags(
+    obs_flg: np.ndarray,
+    obs_max: int,
+) -> list[tuple[int, int]]:
+    """
+    Pair up the start and stop indices of the True runs in an observation flag
+    array.
+
+    Args:
+        obs_flg (np.ndarray): Boolean flag array, one entry per time step.
+        obs_max (int): Total number of time steps in the file.
+
+    Returns:
+        list[tuple[int, int]]: Pairs of (start, stop) indices delimiting each
+            contiguous run of True flags, including runs in progress at the
+            start or end of the file.
+    """
+    # Get indices of time steps where obs_flg changes from its previous value.
+    status_change = np.diff(obs_flg) > 0
+    seg_lst = [int(1 + x) for x in np.argwhere(status_change).flatten()]
+
+    # Check for segments in progress at start or end of file, enclose them as needed
+    if obs_flg[0]:  # We're starting off already in a desired mode, "open" the segment
+        seg_lst = [0] + seg_lst
+    if obs_flg[-1]:  # We're ending while still in a desired mode, "close" the segment
+        seg_lst = seg_lst + [obs_max - 1]
+
+    # Place paired segment starts and stops in list of 2-tuples (1-D list of tuples)
+    pair_iterator = iter(seg_lst)
+    return list(zip(pair_iterator, pair_iterator))
 
 
 def split_on_calibration_segments(
@@ -81,21 +113,7 @@ def split_on_calibration_segments(
     t_jmp = np.diff(nc_data["Time/time_tai"][:]) > MAX_GAP
     obs_flg[np.argwhere(t_jmp).flatten()] = False
 
-    # Get indices of time steps where obs_flg changes from its previous value.
-    status_change = np.diff(obs_flg) > 0
-    seg_lst = [int(1 + x) for x in np.argwhere(status_change).flatten()]
-
-    # Check for segments in progress at start or end of file, enclose them as needed
-    if obs_flg[0]:  # We're starting off already in a desired mode, "open" the segment
-        seg_lst = [0] + seg_lst
-    if obs_flg[-1]:  # We're ending while still in a desired mode, "close" the segment
-        seg_lst = seg_lst + [obs_max - 1]
-
-    # Place paired segment starts and stops in list of 2-tuples (1-D list of tuples)
-    pair_iterator = iter(seg_lst)
-    seg_lst = list(zip(pair_iterator, pair_iterator))
-
-    return seg_lst
+    return _segments_from_flags(obs_flg, obs_max)
 
 
 def split_on_science_segments(
@@ -148,23 +166,7 @@ def split_on_science_segments(
     t_jmp = np.diff(nc_data["Time/time_tai"][:]) > MAX_GAP
     obs_flg[np.argwhere(t_jmp).flatten()] = False
 
-    # Get indices of time steps where obs_flg changes from its previous value.
-    status_change = np.diff(obs_flg) > 0
-    seg_lst = [int(1 + x) for x in np.argwhere(status_change).flatten()]
-
-    # Check for segments in progress at start or end of file, enclose them as needed
-    if obs_flg[0]:  # We're starting off already in SCIENCE mode, "open" the segment
-        seg_lst = [0] + seg_lst
-    if obs_flg[-1]:  # We're ending while still in SCIENCE mode, "close" the segment
-        seg_lst = seg_lst + [obs_max - 1]
-
-    # Place paired segment starts and stops in their own columns (2-D array)
-    # seg_lst = np.array(seg_lst).reshape(len(seg_lst) // 2, 2)  # OR alternatively ...
-    # Place paired segment starts and stops in list of 2-tuples (1-D list of tuples)
-    pair_iterator = iter(seg_lst)
-    seg_lst = list(zip(pair_iterator, pair_iterator))
-
-    return seg_lst
+    return _segments_from_flags(obs_flg, obs_max)
 
 
 def extract_science_passes(nc_data: Dataset):
@@ -258,7 +260,34 @@ def jpl_safe_datetime(
     return date_sanitized
 
 
-def parse_ezie_product_name(source: str | Path):
+@dataclass
+class EzieProductName:
+    """
+    Fields parsed from an EZIE product file name.
+
+    prod: Product level (e.g., "l1", "l2")
+    date: Calendar date string (YYYYMMDD)
+    time: UTC time string (HHMMSS)
+    orbt: Orbit number string (per-orbit names only; NaN for daily names)
+    spcv: Spacecraft identifier (e.g., "a", "b", "c")
+    vrsn: Product version string
+    rvsn: Product revision string
+    dttm: Timezone-aware UTC datetime, or NaN
+
+    For an unparseable name, all fields are set to NaN.
+    """
+
+    prod: str | float = math.nan
+    date: str | float = math.nan
+    time: str | float = math.nan
+    orbt: str | float = math.nan
+    spcv: str | float = math.nan
+    vrsn: str | float = math.nan
+    rvsn: str | float = math.nan
+    dttm: datetime.datetime | float = math.nan
+
+
+def parse_ezie_product_name(source: str | Path) -> EzieProductName:
     """
     Parse an EZIE product file name into its constituent parts.
 
@@ -272,18 +301,15 @@ def parse_ezie_product_name(source: str | Path):
         source (str | Path): Path (or file name) of the EZIE product to parse.
 
     Returns:
-        collections.namedtuple: Parsed product fields - prod, date, time, orbt,
+        EzieProductName: Parsed product fields - prod, date, time, orbt,
             spcv, vrsn, rvsn, and dttm (a timezone-aware UTC datetime, or NaN).
     """
     parsed = None
-    if not isinstance(source, Path):
-        source_as_path = Path(source)
-    else:
-        source_as_path = source
+    source_as_path = Path(source)
     stem = source_as_path.stem
     # TODO: We will need to modify this once L2 and L3 products adopt naming convention
     # that includes the orbit number.
-    if "l1" in stem and "orbit" in source.as_posix():
+    if "l1" in stem and "orbit" in source_as_path.as_posix():
         pattern = (
             "^ezie_([a-zA-Z0-9]{2,3})_(\\d{8})_(\\d{6})_(\\d{6})"
             "_sv([a-c])_v(\\d{2,3})_r(\\d{2,3})$"
@@ -330,24 +356,69 @@ def parse_ezie_product_name(source: str | Path):
     if parsed is None:
         if stem != "":
             # We pass an empty string deliberately when the file filter fails to find a
-            # match, and we deliberately return a 'parsed' dict with entries set to NaN
+            # match, and we deliberately return a parsed name with entries set to NaN
             # in this case. If we fail on a non-empty string, however, we want to know
-            # what is was (and why it was passed here in the first place).
+            # what it was (and why it was passed here in the first place).
             logger.error(f"Encountered exception while parsing filename: {stem}")
-        parsed = {
-            "prod": math.nan,
-            "date": math.nan,
-            "time": math.nan,
-            "orbt": math.nan,
-            "spcv": math.nan,
-            "vrsn": math.nan,
-            "rvsn": math.nan,
-            "dttm": math.nan,
-        }
-    return collections.namedtuple(
-        "GenericDict",
-        parsed.keys(),
-    )(**parsed)
+        return EzieProductName()
+    if "orbt" not in parsed:
+        # Daily-format names carry no orbit number
+        parsed["orbt"] = math.nan
+    return EzieProductName(**parsed)
+
+
+def _latest_revisions(
+    ezie_files: list[Path],
+    start_date: datetime.datetime,
+    stop_date: datetime.datetime,
+    key_fn,
+    dttm_fn,
+) -> list[Path]:
+    """
+    Keep only the highest version/revision file per uniqueness key, filtered to
+    the requested date range.
+
+    Shared core of filter_daily_files_by_version() and filter_files_by_version().
+
+    Args:
+        ezie_files (list[Path]): Sorted list of candidate product paths.
+        start_date (datetime.datetime): Start date (inclusive) of entries to be
+            processed.
+        stop_date (datetime.datetime): Stop date (inclusive) of entries to be
+            processed.
+        key_fn (callable): Maps a parsed EzieProductName to its uniqueness key.
+        dttm_fn (callable): Maps a parsed EzieProductName to a UTC datetime.
+
+    Returns:
+        list[Path]: Sorted list of the highest version/revision files found.
+    """
+    revisions = {}
+    for each_file in ezie_files:
+        prsd = parse_ezie_product_name(each_file)
+        if str(prsd.date) == "nan":
+            logger.error(f"Invalid file name encountered: {each_file.stem}")
+            continue  # file name was NOT valid
+        file_dttm = dttm_fn(prsd)
+        logger.debug(f"Examining file {each_file.name} with datetime {file_dttm}")
+        # Will "backup" subdirectory regularly appear in pipeline data directory? TBD
+        if (
+            (start_date <= file_dttm <= stop_date)
+            and (each_file.parent != "backup")
+        ):
+            file_key = key_fn(prsd)
+            revision = f"v{prsd.vrsn}_r{prsd.rvsn}"
+            logger.debug(f"{file_key} {revision}")
+            if file_key not in revisions:
+                revisions[file_key] = (revision, each_file)
+            else:
+                # Only keep file with the highest version/revision
+                revisions[file_key] = max(revisions[file_key], (revision, each_file))
+        else:
+            logger.debug(
+                f"File {each_file.name} with datetime {file_dttm} did not meet "
+                f"date specifications {start_date} <= file_dttm <= {stop_date}"
+            )
+    return sorted(each_file for _, each_file in revisions.values())
 
 
 def filter_daily_files_by_version(
@@ -374,8 +445,6 @@ def filter_daily_files_by_version(
         list[Path] | None: Sorted list of the highest version/revision files
             found, or None if no files matched.
     """
-    log_mthd = logger.debug
-    # log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
@@ -383,47 +452,22 @@ def filter_daily_files_by_version(
         logger.warning(f"Returning, no files found matching {file_pattern}")
         return
 
-    # Further filter the initial group of files by date, keeping only the latest version
-    # for any given date and spacecraft.
-    revisions = {}
+    # Further filter the initial group of files by date, keeping only the latest
+    # version for any given date and spacecraft.
     dttm_frmt = "%Y%m%d"
-    for each_file in ezie_files:
-        prsd = parse_ezie_product_name(each_file)
-        if str(prsd.date) == "nan":
-            logger.error(f"Invalid file name encountered: {each_file.stem}")
-            continue  # file name was NOT valid
-        file_dttm = datetime.datetime.strptime(f"{prsd.date}", dttm_frmt).replace(
-            tzinfo=datetime.UTC
-        )
-        log_mthd(f"Examining file {each_file.name} with date {prsd.date}")
-        # Will "backup" subdirectory regularly appear in pipeline data directory? TBD
-        if (
-            (file_dttm >= start_date)
-            and (file_dttm <= stop_date)
-            and (each_file.parent != "backup")
-        ):
-            file_key, revision = (
-                f"{prsd.date}_sv{prsd.spcv}",
-                f"v{prsd.vrsn}_r{prsd.rvsn}",
-            )
-            logger.debug(f"{file_key} {revision}")
-            if file_key not in revisions:
-                revisions[file_key] = (revision, each_file)
-            else:
-                # Only keep file with the highest version/revision
-                revisions[file_key] = max(revisions[file_key], (revision, each_file))
-        else:
-            log_mthd(
-                f"File {each_file.name} with date {prsd.date} did not meet "
-                f"date specifications {start_date} <= {file_dttm} <= {stop_date}"
-            )
-
-    newest_versions = sorted([each_file[1] for each_file in revisions.values()])
+    newest_versions = _latest_revisions(
+        ezie_files,
+        start_date,
+        stop_date,
+        key_fn=lambda prsd: f"{prsd.date}_sv{prsd.spcv}",
+        dttm_fn=lambda prsd: datetime.datetime.strptime(
+            f"{prsd.date}", dttm_frmt
+        ).replace(tzinfo=datetime.UTC),
+    )
     if len(newest_versions) > 0:
-        log_mthd(f"Newest version[s]: {[str(vrsn) for vrsn in newest_versions]}")
+        logger.debug(f"Newest version[s]: {[str(vrsn) for vrsn in newest_versions]}")
         return newest_versions
-    else:
-        return  # return None, do NOT return an empty list
+    return  # return None, do NOT return an empty list
 
 
 def filter_files_by_version(
@@ -455,117 +499,75 @@ def filter_files_by_version(
         list[Path] | None: Sorted list of matching files, or None if no files
             matched.
     """
-    log_mthd = logger.debug
-    # log_mthd = logger.info
     # Use glob to find all files matching the high-level pattern and sort them
     id_path = Path(file_directory)
     ezie_files = sorted(id_path.rglob(pattern=file_pattern))
     if len(ezie_files) == 0:
-        log_mthd(f"{file_pattern}")
         logger.warning(f"Returning, no files found matching {file_pattern}")
         return
 
-    # Further filter the initial group of files by date, keeping only the latest version
-    # for any given date and spacecraft.
-    revisions = {}
-    # dttm_frmt = "%Y%m%d_%H%M%S"
-    for each_file in ezie_files:
-        prsd = parse_ezie_product_name(each_file)
-        if str(prsd.date) == "nan":
-            logger.error(f"Invalid file name encountered: {each_file.stem}")
-            continue  # file name was NOT valid
-        file_dttm = jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time)
-        # Deal with invalid datetime formats
-        # file_dttm = datetime.datetime.strptime(
-        #     f"{prsd.date}_{prsd.time}", dttm_frmt
-        # ).replace(tzinfo=datetime.UTC)
-        log_mthd(f"Examining file {each_file.name} with date {prsd.date}_{prsd.time}")
-        # Will "backup" subdirectory regularly appear in pipeline data directory? TBD
-        if (
-            (file_dttm >= start_date)
-            and (file_dttm <= stop_date)
-            and (each_file.parent != "backup")
-        ):
-            file_key, revision = (
-                f"{prsd.date}_{prsd.time}_sv{prsd.spcv}",
-                f"v{prsd.vrsn}_r{prsd.rvsn}",
-            )
-            log_mthd(f"{file_key} {revision}")
-            if file_key not in revisions:
-                revisions[file_key] = (revision, each_file)
-            else:
-                # Only keep file with the highest version/revision
-                revisions[file_key] = max(revisions[file_key], (revision, each_file))
-        else:
-            log_mthd(
-                f"File {each_file.name} with date {prsd.date}_{prsd.time} did not meet "
-                f"date specifications {start_date} <= {file_dttm} <= {stop_date}"
-            )
+    # Further filter the initial group of files by date, keeping only the latest
+    # version for any given date, spacecraft, and observation time.
+    newest_versions = _latest_revisions(
+        ezie_files,
+        start_date,
+        stop_date,
+        key_fn=lambda prsd: f"{prsd.date}_{prsd.time}_sv{prsd.spcv}",
+        dttm_fn=lambda prsd: jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time),
+    )
+    logger.debug(f"Newest versions are {newest_versions}")
+    if len(newest_versions) == 0:
+        return  # return None, do NOT return an empty list
 
-    newest_versions = sorted([each_file[1] for each_file in revisions.values()])
-    log_mthd(f"Newest versions are {newest_versions}")
-
-    # Do we need to prune files with the _same_ version and date but only slightly
-    # differing timestamps (applies only to per-orbit L2 and L3 files)?
     if not remove_near_dupes:
-        # No. We can just stop now and return results.
-        if len(newest_versions) > 0:
-            return newest_versions
-        else:
-            return  # return None, do NOT return an empty list
+        # No near-duplicate pruning needed, we can just stop now and return results.
+        return newest_versions
+
+    # Prune files with the _same_ version and date but only slightly differing
+    # timestamps (applies only to per-orbit L2 and L3 files), keeping the latest
+    # of each cluster.
+    tstamps = {}
+    for ff, each_file in enumerate(newest_versions):
+        logger.debug(f"Input {ff:04d} {each_file.name}")
+        prsd = parse_ezie_product_name(each_file)
+        file_key = f"sv{prsd.spcv}_v{prsd.vrsn}_r{prsd.rvsn}"
+        tstamp = jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time)
+        logger.debug(f"{file_key} {tstamp}")
+        if file_key not in tstamps:
+            tstamps[file_key] = []
+        tstamps[file_key].append((tstamp, each_file))
+
+    # Files should ALWAYS be of the same product type; inspect the first to decide
+    # the near-duplicate time limit.
+    first_file = newest_versions[0]
+    if "_l0" in first_file.stem or (
+        ("_l1_" in first_file.stem) and ("daily" in first_file.parent.name)
+    ):
+        dup_time_limit = 86400  # seconds, for full day files
     else:
-        # Yes. We need to do some more filtering (below).
-        tstamps = {}
-        for ff, each_file in enumerate(newest_versions):
-            log_mthd(f"Input {ff:04d} {each_file.name}")
-            prsd = parse_ezie_product_name(each_file)
-            file_key, tstamp = (
-                f"sv{prsd.spcv}_v{prsd.vrsn}_r{prsd.rvsn}",
-                jpl_safe_datetime(datestr=prsd.date, timestr=prsd.time),
-                # datetime.datetime.strptime(
-                #     f"{prsd.date}_{prsd.time}", dttm_frmt
-                # ).replace(tzinfo=datetime.UTC),
-            )
-            log_mthd(f"{file_key} {tstamp}")
-            if file_key not in tstamps:
-                tstamps[file_key] = []
-            tstamps[file_key].append((tstamp, each_file))
+        dup_time_limit = 60  # seconds, for single orbit files
 
-        # Files should ALWAYS be of the same product type
-        if "_l0" in each_file.stem or (
-            ("_l1_" in each_file.stem) and ("daily" in each_file.parent.name)
-        ):
-            dup_time_limit = 86400  # seconds, for full day files
-        else:
-            dup_time_limit = 60  # seconds, for single orbit files
+    all_pruned = []
+    for each_key, each_val in tstamps.items():
+        logger.debug(f"{each_key} {each_val}")
+        # Cluster consecutive entries separated by <= dup_time_limit, keeping the
+        # latest (last) entry of each cluster.
+        cluster = [each_val[0]]
+        for tstamp, each_file in each_val[1:]:
+            if (tstamp - cluster[-1][0]).total_seconds() > dup_time_limit:
+                all_pruned.append(cluster[-1])
+                cluster = [(tstamp, each_file)]
+            else:
+                cluster[-1] = (tstamp, each_file)
+        all_pruned.append(cluster[-1])
 
-        all_pruned = []
-        for each_key, each_val in tstamps.items():
-            log_mthd(f"{each_key} {each_val}")
-            pruned = [each_val[0]]
-            pp = 0
-            for each_time in each_val[1:]:
-                log_mthd(
-                    f"{each_time[0]} {pruned[pp][0]} "
-                    f"{(each_time[0] - pruned[pp][0]).total_seconds()} "
-                    f"{dup_time_limit}"
-                )
-                if (each_time[0] - pruned[pp][0]).total_seconds() > dup_time_limit:
-                    pruned.append(each_time)
-                    pp += 1
-                else:
-                    pruned[pp] = each_time
-            all_pruned.extend(pruned)
-            log_mthd(f"{pruned} {all_pruned}")
-
-        pruned_versions = sorted([each_pair[1] for each_pair in all_pruned])
-        log_mthd(f"Pruned versions are {pruned_versions}")
-        if len(pruned_versions) > 0:
-            for ff, each_file in enumerate(pruned_versions):
-                log_mthd(f"Pruned: {ff:04d} {each_file.name}")
-            return pruned_versions
-        else:
-            return  # do NOT return an empty list
+    pruned_versions = sorted(each_pair[1] for each_pair in all_pruned)
+    logger.debug(f"Pruned versions are {pruned_versions}")
+    if len(pruned_versions) > 0:
+        for ff, each_file in enumerate(pruned_versions):
+            logger.debug(f"Pruned: {ff:04d} {each_file.name}")
+        return pruned_versions
+    return  # do NOT return an empty list
 
 
 def get_datetime_from_utc_string(
@@ -592,30 +594,22 @@ def get_datetime_from_utc_string(
         tslc = np.s_[indices[0] : indices[1]]
     else:
         tslc = np.s_[:]
-    try:
-        datetimes_utc = [
-            # datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%fZ")
-            datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").replace(
-                tzinfo=datetime.UTC
-            )
-            for t in nc_time_group.variables["time_utc"][tslc]
-        ]
-    except ValueError:
-        try:
-            datetimes_utc = [
-                datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%fZ").replace(
-                    tzinfo=datetime.UTC
+    time_strs = nc_time_group.variables["time_utc"][tslc]
+    # Timestamps have been seen with and without a trailing "Z".
+    dttm_fmts = ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%fZ")
+    datetimes_utc = []
+    for tstr in time_strs:
+        for fmt in dttm_fmts:
+            try:
+                datetimes_utc.append(
+                    datetime.datetime.strptime(tstr, fmt).replace(tzinfo=datetime.UTC)
                 )
-                for t in nc_time_group.variables["time_utc"][tslc]
-            ]
-        except ValueError:
-            logger.error(
-                f"Unable to process UTC time strings: "
-                f"{nc_time_group.variables['time_utc'][tslc]}"
-            )
+                break
+            except ValueError:
+                continue
+        else:
+            logger.error(f"Unable to process UTC time strings: {time_strs}")
             return None
-    # n_times: int = len(datetimes_utc)
-    # return np.array(datetimes_utc), datetimes_utc[n_times // 2]
     return np.array(datetimes_utc), datetimes_utc[0]
 
 
@@ -664,15 +658,13 @@ def convert_to_mag(
     """
     if geom.is_empty:
         return geom
+    if geom.geom_type == "Polygon":
+        raise RuntimeError("Polygon case not yet supported")
 
     apex = Apex(date=year4mag, refh=0)
     if geom.has_z:
 
-        def convert_to_mag_doer(
-            coords,
-            time4mag,
-            _,
-        ):
+        def convert_to_mag_doer(coords):
             """
             For features that have a z coordinate.
             QUERY: Are there any that we use? TBD
@@ -689,32 +681,16 @@ def convert_to_mag(
                     long,
                     _alt4mag,
                 )
-                # [lat_mag, long_mag, alt_mag] = apex.gg_gm_apex(
-                #     int(year4mag),
-                #     lat,
-                #     long,
-                #     _alt4mag,
-                #     apex.GEO_TO_MAG,
-                # )
                 yield (long_mag, lat_mag, _alt4mag)
             # END FOR long, lat, alt_mag
 
     else:
 
-        def convert_to_mag_doer(
-            coords,
-            year4mag,
-            alt4mag,
-        ):
+        def convert_to_mag_doer(coords):
             """
             For surface features that don't have a z coordinate. Validated for EZIE use.
             """
             for long, lat in coords:
-                # # Sanitize longitude range for APEX
-                # if long > 180.0:
-                #     long -= 360.0
-                # if long < -180.0:
-                #     long += 360.0
                 [lat_mag, long_mag] = apex.geo2apex(
                     lat,
                     long,
@@ -722,25 +698,42 @@ def convert_to_mag(
                 )
                 yield (long_mag, lat_mag)
 
-    # end if geom.has_Z
+    logger.debug("Converting feature from geodetic to magnetic coords")
+    return _apply_coord_transform(geom, convert_to_mag_doer)
 
-    # Process coordinates from each supported geometry type
+
+def _apply_coord_transform(geom, coord_fn):
+    """
+    Apply a coordinate function to a shapely geometry, preserving its type.
+
+    The per-geometry-type dispatch shared by convert_to_mag() and reverse_lon().
+
+    Args:
+        geom: Shapely geometry (Point, LineString, LinearRing, Polygon, Multi*,
+            or GeometryCollection).
+        coord_fn (callable): Maps an iterable of (lon, lat[, alt]) coordinate
+            tuples to a new iterable of coordinate tuples.
+
+    Returns:
+        Shapely geometry: A geometry of the same type with transformed
+            coordinates.
+
+    Raises:
+        ValueError: If the geometry type is not recognized.
+    """
     if geom.geom_type in ("Point", "LineString", "LinearRing"):
-        logger.debug(
-            "Converting simple (Point, LineString, linearRing) feature from geodetic "
-            "to magnetic coords"
-        )
-        return type(geom)(list(convert_to_mag_doer(geom.coords, year4mag, alt4mag)))
-    elif geom.geom_type == "Polygon":
-        raise RuntimeError("Polygon case not yet supported")
-    elif geom.geom_type.startswith("Multi") or geom.geom_type == "GeometryCollection":
+        return type(geom)(list(coord_fn(geom.coords)))
+    if geom.geom_type == "Polygon":
+        ring = geom.exterior
+        shell = type(ring)(list(coord_fn(ring.coords)))
+        holes = [type(ring)(list(coord_fn(ring.coords))) for ring in geom.interiors]
+        return type(geom)(shell, holes)
+    if geom.geom_type.startswith("Multi") or geom.geom_type == "GeometryCollection":
         # Recursive call
-        logger.debug("Converting geometry collection from geodetic to magnetic coords")
         return type(geom)(
-            [convert_to_mag(part, year4mag, alt4mag) for part in geom.geoms]
+            [_apply_coord_transform(part, coord_fn) for part in geom.geoms]
         )
-    else:
-        raise ValueError(f"Type {geom.geom_type!r} not recognized")
+    raise ValueError(f"Type {geom.geom_type!r} not recognized")
 
 
 def reverse_lon(
@@ -770,29 +763,10 @@ def reverse_lon(
         For surface features that don't have a z coordinate. Validated for EZIE use.
         """
         for long, lat in coords:
-            [lat_inv, long_inv] = [lat, -1 * long]
-            yield (long_inv, lat_inv)
+            yield (-1 * long, lat)
 
-    # Process coordinates from each supported geometry type
-    if geom.geom_type in ("Point", "LineString", "LinearRing"):
-        logger.debug(
-            "Inverting latitude of simple (Point, LineString, linearRing) feature"
-        )
-        return type(geom)(list(reverse_lon_doer(geom.coords)))
-    elif geom.geom_type == "Polygon":
-        logger.debug("Inverting latitude of polygonal feature")
-        ring = geom.exterior
-        shell = type(ring)(list(reverse_lon_doer(ring.coords)))
-        holes = list(geom.interiors)
-        for pos, ring in enumerate(holes):
-            holes[pos] = type(ring)(list(reverse_lon_doer(ring.coords)))
-        return type(geom)(shell, holes)
-    elif geom.geom_type.startswith("Multi") or geom.geom_type == "GeometryCollection":
-        # Recursive call
-        logger.debug("Inverting latitude in geometry collection")
-        return type(geom)([reverse_lon_doer(part) for part in geom.geoms])
-    else:
-        raise ValueError(f"Type {geom.geom_type!r} not recognized")
+    logger.debug("Inverting longitude of feature")
+    return _apply_coord_transform(geom, reverse_lon_doer)
 
 
 @functools.cache
@@ -1358,6 +1332,102 @@ def hash_ezie_data_product(source: str | Path):
         return hashlib.file_digest(fp, "md5").hexdigest()
 
 
+def _build_figure_path(
+    plot_type: str,
+    obs_date: datetime.datetime,
+    save_directory: Path,
+    source: Path | None = None,
+    spacecraft: str | None = None,
+    orbit: int | None = None,
+    tstmp: int | None = None,
+    version: str | None = None,
+    dpi: int | None = DFLT_RES,
+    dark_mode: bool = False,
+    old_format: bool = False,
+) -> Path:
+    """
+    Construct the plot output path (creating the date subdirectory as needed)
+    from the supplied naming parameters.
+
+    There are currently three cases:
+        1) Daily summary plots have no source, spacecraft or tstmp/orbit.
+        2) Calibration, ancillary, and geolocation plots have an L0B or L1
+           source file from which spacecraft and obs_date may be parsed, but
+           the pass tstmp/orbit must be determined from data internal to the
+           file, and there are typically 15 orbits per file. NOTE: This may
+           change to a single orbit per file soon!
+        3) L2 and L3 plots are generated on a single orbit basis, and all
+           required plot naming parameters can be extracted from the source
+           file name.
+
+    Args:
+        plot_type (str): Short identifier of the plot type, used in the file
+            name.
+        obs_date (datetime.datetime): UTC date of the observations, used for
+            the output subdirectory and file name.
+        save_directory (Path): Root directory in which to save the plot file.
+        source (Path | None, optional): Path of the source data file, used for
+            plot naming. None for daily summary plots. Defaults to None.
+        spacecraft (str | None, optional): Spacecraft identifier (e.g., "A",
+            "B", or "C"). Defaults to None.
+        orbit (int | None, optional): Orbit number (may be a timestamp proxy
+            until actual orbit numbers are available). Defaults to None.
+        tstmp (int | None, optional): Pass start timestamp used in the file
+            name for L0/L1 products. Defaults to None.
+        version (str | None, optional): Product version/revision string
+            included in the file name. Defaults to None.
+        dpi (int | None, optional): Resolution (DPI) included in the file
+            name when old_format is used. Defaults to DFLT_RES.
+        dark_mode (bool, optional): Include "DM" rather than "LM" in the file
+            name when old_format is used. Defaults to False.
+        old_format (bool, optional): Use the legacy file naming scheme.
+            Defaults to False.
+
+    Returns:
+        Path: Full path of the plot file to be (or already having been) saved.
+    """
+    if old_format:
+        od_path = save_directory / obs_date.strftime("%Y-%j-%m-%d")
+        od_path.mkdir(parents=True, exist_ok=True)
+        spacecraft_str = f"{spacecraft!s}_" if spacecraft is not None else ""
+        # FIXME: Need to transition from "timestamp" orbit number to actual value
+        orbit_str = f"Orbit-{int(orbit):06d}_" if orbit is not None else ""
+        tstmp_str = f"Orbit-{int(tstmp):06d}_" if tstmp is not None else orbit_str
+        version_str = f"{version}_" if version is not None else ""
+        if dpi is None:
+            dpi = DFLT_RES
+        return od_path / "_".join(
+            [
+                obs_date.strftime("%Y-%j-%m-%d"),
+                "DM" if dark_mode else "LM",
+                f"{dpi:03d}_DPI{spacecraft_str}{tstmp_str}{version_str}{plot_type}.png",
+            ]
+        )
+
+    od_path = save_directory / obs_date.strftime("%Y%m%d")
+    if spacecraft is not None:
+        od_path = od_path / str(spacecraft)[-1].lower()
+    od_path.mkdir(parents=True, exist_ok=True)
+    orbit_str = f"{int(orbit):06d}_" if orbit is not None else ""
+    spacecraft_str = f"sv{str(spacecraft)[-1].lower()}_" if spacecraft is not None else ""
+    version_str = f"{version}_" if version is not None else ""
+    if source is not None:
+        prsd = parse_ezie_product_name(source)
+        if prsd.prod == "l2" or prsd.prod == "l3":
+            tstmp_str = prsd.time
+        else:
+            tstmp_str = f"{int(tstmp):06d}" if tstmp is not None else ""
+        return od_path / (
+            f"ezie_{prsd.prod}_{prsd.date}_{tstmp_str}_sv{prsd.spcv}_"
+            f"{plot_type}.png"
+        )
+    tstmp_str = f"{int(tstmp):06d}_" if tstmp is not None else orbit_str
+    return od_path / (
+        f"ezie_{obs_date.strftime('%Y%m%d')}_"
+        f"{tstmp_str}{spacecraft_str}{version_str}{plot_type}.png"
+    )
+
+
 def save_close_figure(
     plot_type: str,
     obs_date: datetime.datetime,
@@ -1369,20 +1439,13 @@ def save_close_figure(
     orbit: int | None = None,
     tstmp: int | None = None,
     version: str | None = None,
-    dpi: int = DFLT_RES,
+    dpi: int | None = DFLT_RES,
     dark_mode: bool = False,
     old_format: bool = False,
-) -> Path:
+) -> Path | tuple[Path, str | None, str | None]:
     """
-    Save and then close figure, constructing name and path from supplied parameters.
-    There are currently three cases:
-        1) Daily summary plots have no source, spacecraft or tstmp/orbit.
-        2) Calibration, ancillary, and geolocation plots have an L0B or L1 source file
-           from which spacecraft and obs_date may be parsed, but the pass tstmp/orbit
-           must be determined from data internal to the file, and there are typically 15
-           orbits per file. NOTE: This may change to a single orbit per file soon!
-        3) L2 and L3 plots are generated on a single orbit basis, and all required plot
-           naming parameters can be extracted from the source file name.
+    Save and then close a figure, constructing the name and path from supplied
+    parameters via _build_figure_path().
 
     Args:
         plot_type (str): Short identifier of the plot type, used in the file
@@ -1406,16 +1469,17 @@ def save_close_figure(
             name for L0/L1 products. Defaults to None.
         version (str | None, optional): Product version/revision string
             included in the file name. Defaults to None.
-        dpi (int, optional): Resolution (DPI) at which to save the figure.
-            Defaults to DFLT_RES.
+        dpi (int | None, optional): Resolution (DPI) at which to save the
+            figure. Defaults to DFLT_RES.
         dark_mode (bool, optional): Include "DM" rather than "LM" in the file
             name when old_format is used. Defaults to False.
         old_format (bool, optional): Use the legacy file naming scheme.
             Defaults to False.
 
     Returns:
-        Path | tuple: The path of the saved figure, or, when name_only is
-            True, a tuple of (path, old source hash, new source hash).
+        Path | tuple[Path, str | None, str | None]: The path of the saved
+            figure, or, when name_only is True, a tuple of (path, old source
+            hash, new source hash).
     """
 
     old_hash = None
@@ -1424,65 +1488,31 @@ def save_close_figure(
     else:
         new_hash = None
 
-    if old_format:
-        od_path = save_directory / obs_date.strftime("%Y-%j-%m-%d")
-        if not od_path.exists():
-            od_path.mkdir(parents=True, exist_ok=True)
-        spacecraft_str = f"{spacecraft!s}_" if spacecraft is not None else ""
-        # FIXME: Need to transition from "timestamp" orbit number to actual value
-        orbit_str = f"Orbit-{int(orbit):06d}_" if orbit is not None else ""
-        tstmp_str = f"Orbit-{int(tstmp):06d}_" if tstmp is not None else orbit_str
-        version_str = f"{version}_" if version is not None else ""
-        if dpi is None:
-            dpi = DFLT_RES
-        fig_path = od_path / "_".join(
-            [
-                obs_date.strftime("%Y-%j-%m-%d"),
-                "DM" if dark_mode else "LM",
-                f"{dpi:03d}_DPI{spacecraft_str}{tstmp_str}{version_str}{plot_type}.png",
-            ]
-        )
+    fig_path = _build_figure_path(
+        plot_type=plot_type,
+        obs_date=obs_date,
+        save_directory=save_directory,
+        source=source,
+        spacecraft=spacecraft,
+        orbit=orbit,
+        tstmp=tstmp,
+        version=version,
+        dpi=dpi,
+        dark_mode=dark_mode,
+        old_format=old_format,
+    )
 
-    else:
-        od_path = save_directory / obs_date.strftime("%Y%m%d")
-        if spacecraft is not None:
-            od_path = od_path / str(spacecraft)[-1].lower()
-        if not od_path.exists():
-            od_path.mkdir(parents=True, exist_ok=True)
-        orbit_str = f"{int(orbit):06d}_" if orbit is not None else ""
-        # QUERY: Do we need to transition from a "timestamp" orbit number to the actual
-        # value?
-        spacecraft_str = (
-            f"sv{str(spacecraft)[-1].lower()}_" if spacecraft is not None else ""
-        )
-        version_str = f"{version}_" if version is not None else ""
-        if source is not None:
-            prsd = parse_ezie_product_name(source)
-            if prsd.prod == "l2" or prsd.prod == "l3":
-                tstmp_str = prsd.time
-            else:
-                tstmp_str = f"{int(tstmp):06d}" if tstmp is not None else ""
-            fig_path = od_path / (
-                f"ezie_{prsd.prod}_{prsd.date}_{tstmp_str}_sv{prsd.spcv}_"
-                f"{plot_type}.png"
-            )
-        else:
-            tstmp_str = f"{int(tstmp):06d}_" if tstmp is not None else orbit_str
-            fig_path = od_path / (
-                f"ezie_{obs_date.strftime('%Y%m%d')}_"
-                f"{tstmp_str}{spacecraft_str}{version_str}{plot_type}.png"
-            )
-        if fig_path.exists():
-            # Open image and access metadata (PNG text chunks)
-            img = Image.open(fig_path)
-            try:
-                metadata = img.text
-                logger.debug(f"{type(metadata)}")
-                logger.debug(f"{metadata!s}")
-                if "EZIE Source Hash" in metadata:
-                    old_hash = metadata["EZIE Source Hash"]
-            except Exception as exc:
-                logger.warning(f"{exc}: Unable to read image metadata, will regenerate")
+    if not old_format and fig_path.exists():
+        # Open image and access metadata (PNG text chunks)
+        img = Image.open(fig_path)
+        try:
+            metadata = img.text
+            logger.debug(f"{type(metadata)}")
+            logger.debug(f"{metadata!s}")
+            if "EZIE Source Hash" in metadata:
+                old_hash = metadata["EZIE Source Hash"]
+        except Exception as exc:
+            logger.warning(f"{exc}: Unable to read image metadata, will regenerate")
 
     if name_only:
         logger.debug(f"Figure path would be: {fig_path.name}")
