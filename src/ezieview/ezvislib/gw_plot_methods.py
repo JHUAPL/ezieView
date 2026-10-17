@@ -59,7 +59,6 @@ from ezieview.ezvislib.gw_plot_params import (
     SPACECRAFT,
     TERMINATOR_ALPHA,
     TERMINATOR_COLOR,
-    TOT_MOD,
     C,
 )
 from ezieview.ezvislib.gw_plot_utils import (
@@ -102,6 +101,327 @@ MEM_BEAM_DIAGRAM_PATH = (
     # Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
 )
 # endregion
+
+
+def _apply_dark_mode(dark_mode: bool) -> None:
+    """
+    Switch to the 'dark_background' style and matching face colors.
+    """
+    if dark_mode:
+        plt.style.use("dark_background")
+        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
+        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+
+
+def _plot_needs_update(
+    source: Path,
+    save_directory: Path,
+    obs_date: datetime.datetime,
+    plot_type: str,
+    *,
+    type_desc: str | None = None,
+    spacecraft: str | None = None,
+    orbit: int | None = None,
+    tstmp: int | str | None = None,
+    version: str | None = None,
+    dpi: int = DFLT_RES,
+    dark_mode: bool = False,
+    old_format: bool = False,
+    overwrite: bool = False,
+) -> Path | None:
+    """
+    Check whether the plot for the given source and plot type needs to be
+    (re)generated.
+
+    Args:
+        source (Path): Path of the source data file.
+        save_directory (Path): Root directory in which to save the plot file.
+        obs_date (datetime.datetime): UTC date of the observations.
+        plot_type (str): Short identifier of the plot type, used in the
+            file name.
+        type_desc (str | None, optional): Human-readable plot description
+            for logging; defaults to plot_type.
+        spacecraft (str | None, optional): Spacecraft identifier.
+        orbit (int | None, optional): Orbit number.
+        tstmp (int | str | None, optional): Pass start timestamp.
+        version (str | None, optional): Product version/revision string.
+        dpi (int, optional): Resolution (DPI) of the plot.
+        dark_mode (bool, optional): Dark-mode plot.
+        old_format (bool, optional): Legacy file naming scheme.
+        overwrite (bool, optional): Overwrite existing plot files.
+
+    Returns:
+        Path | None: Target plot path if plotting should proceed, or None
+            if an up-to-date plot already exists and overwrite is not set.
+    """
+    ftgt, old_hash, new_hash = save_close_figure(
+        source=source,
+        save_directory=save_directory,
+        obs_date=obs_date,
+        spacecraft=spacecraft,
+        orbit=orbit,
+        tstmp=tstmp,
+        version=version,
+        plot_type=plot_type,
+        dpi=dpi,
+        dark_mode=dark_mode,
+        old_format=old_format,
+        name_only=True,
+    )
+    logger.debug(f"Checked file: {ftgt.as_posix()}")
+    if not plot_update_required(
+        source=source,
+        ftgt=ftgt,
+        plot_type=type_desc if type_desc is not None else plot_type,
+        old_hash=old_hash,
+        new_hash=new_hash,
+        overwrite=overwrite,
+    ):
+        return None
+    return ftgt
+
+
+def _finalize_figure(
+    fig: plt.Figure,
+    nc_data: Dataset,
+    source: Path,
+    title: str,
+    *,
+    git_branch: str | None = None,
+    git_commit: str | None = None,
+    size: str = "small",
+    dark_mode: bool = False,
+) -> None:
+    """
+    Add the suptitle, product and pipeline metadata, and the EZIE logo to a
+    figure.
+    """
+    fig.suptitle(title, weight="bold", fontsize="x-large", y=0.99, va="top")
+    add_product_metadata(fig=fig, nc_data=nc_data, source=source, size=size)
+    add_pipeline_metadata(
+        fig=fig,
+        nc_data=nc_data,
+        git_branch=git_branch,
+        git_commit=git_commit,
+        size=size,
+    )
+    overlay_ezie_logo(fig=fig, dark_mode=dark_mode)
+
+
+def _subsolar_geodetic(time_utc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the subsolar point in geodetic coordinates at each UTC time using
+    SPICE.
+
+    Args:
+        time_utc (np.ndarray): Array of timezone-aware UTC datetimes.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: (longitude_deg, latitude_deg) arrays
+            of the subsolar point at each time.
+    """
+    subpnt_rad = []
+    for tutc in time_utc:
+        tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
+        (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
+            "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
+        )
+        # Fix the subsolar point on the surface in geodetic coordinates
+        subpnt_rad.append(
+            spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
+        )
+    sun_geo_lon_deg = np.array([np.degrees(x[0]) for x in subpnt_rad])
+    sun_geo_lat_deg = np.array([np.degrees(x[1]) for x in subpnt_rad])
+    return sun_geo_lon_deg, sun_geo_lat_deg
+
+
+def _subsolar_geodetic_at(tutc: datetime.datetime) -> tuple[float, float]:
+    """
+    Compute the subsolar point in geodetic coordinates at a single UTC time.
+
+    Returns:
+        tuple[float, float]: (longitude_deg, latitude_deg), with longitude
+            folded into the [-180, +180] range.
+    """
+    tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
+    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
+        "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
+    )
+    sun_rad = spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
+    sun_lon_mid = np.degrees(sun_rad[0])
+    if sun_lon_mid > 180.0:
+        sun_lon_mid -= 360.0
+    return float(sun_lon_mid), float(np.degrees(sun_rad[1]))
+
+
+def _select_hemisphere(lat: float) -> str | None:
+    """
+    Select the plotting hemisphere from a geographic latitude.
+    """
+    if lat > +40.0:
+        return NORTH
+    if lat < -40.0:
+        return SOUTH
+    return None
+
+
+def _inset_map_projection(
+    hemisphere: str | None,
+    lat: float,
+    lon: float,
+) -> ccrs.Projection:
+    """
+    Projection for the per-orbit footprint map insets: polar stereographic
+    for the polar hemispheres, orthographic centered on the pass midpoint
+    otherwise.
+    """
+    if hemisphere == NORTH:
+        return ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
+    if hemisphere == SOUTH:
+        return ccrs.SouthPolarStereo(central_longitude=180)  # 0 is default
+    return ccrs.Orthographic(central_latitude=lat, central_longitude=lon)
+
+
+def _make_l3_projection(
+    hemisphere: str | None,
+    sun_geo_lon_mid: float,
+    lat_at_midpt: float,
+    lon_at_midpt: float,
+    south_inverted: bool,
+) -> tuple[np.ndarray, int, ccrs.Projection]:
+    """
+    Select the magnetic-latitude parallels, MLT sense, and cartopy projection
+    for an L3 map of the given hemisphere.
+
+    'lats_m' are the magnetic latitudes at which to overlay parallels: the
+    ACTUAL APEX mlats, with sign appropriate for the selected hemisphere
+    regardless of any projection tricks. 'MLT_sign' (-1 for a south-inverted
+    map) is used to "trick" cartopy into plotting the southern hemisphere in
+    the heliophysics "transparent earth" format, where we look down at the
+    SOUTH pole from above the NORTH pole. That 'south_inverted' format keeps
+    Noon, Dawn, etc. in the same relative positions and orientation for both
+    hemispheres; the multiplier is applied to the "projected" quantities while
+    latitudes retain their normal hemisphere-appropriate sense.
+
+    Returns:
+        tuple[np.ndarray, int, ccrs.Projection]: (lats_m, MLT_sign, map_proj)
+    """
+    MLT_sign = +1
+    if hemisphere == NORTH:
+        lats_m = np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
+        map_proj = ccrs.NorthPolarStereo(
+            central_longitude=sun_geo_lon_mid + 180,
+            true_scale_latitude=+60,
+        )
+    elif hemisphere == SOUTH:
+        lats_m = -1 * np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
+        if south_inverted:
+            MLT_sign = -1
+        map_proj = ccrs.SouthPolarStereo(
+            central_longitude=MLT_sign * sun_geo_lon_mid,
+            true_scale_latitude=-60,
+        )
+    else:
+        lats_m = np.arange(-GEO_LAT_LOWER_LIMIT, +GEO_LAT_LOWER_LIMIT, 10.0)
+        map_proj = ccrs.Stereographic(
+            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
+        )
+    return lats_m, MLT_sign, map_proj
+
+
+def _mlt_label(mlt_deg: float) -> str:
+    """
+    MLT axis label for a magnetic local time angle (degrees), with cardinal
+    names at midnight, dawn, noon, and dusk.
+    """
+    if mlt_deg == 0.0:
+        return "Midnight"
+    if mlt_deg == 90.0:
+        return "Dawn"
+    if mlt_deg == 180.0:
+        return "Noon"
+    if mlt_deg == 270.0:
+        return "Dusk"
+    return f"{mlt_deg / 15:02.0f}H"
+
+
+def _stack_mem_fields(nc_data: Dataset, field_tmpl: str) -> np.ndarray:
+    """
+    Stack the MEM-numbered netCDF fields `field_tmpl{1..4}` into a single
+    (NUM_MEM, n_obs) array.
+    """
+    return np.vstack((nc_data[f"{field_tmpl}{mm}"] for mm in MEM_NUMBERS))
+
+
+def _update_range(
+    pair: np.ndarray, low_sample: np.ndarray, high_sample: np.ndarray | None = None
+) -> None:
+    """
+    Widen a length-2 [min, max] pair (in place) to include all finite values
+    of the given samples. The minimum is widened by low_sample and the maximum
+    by high_sample (low_sample when not given). NaN entries are ignored.
+    """
+    if high_sample is None:
+        high_sample = low_sample
+    pair[0] = np.nanmin(
+        np.concatenate(([pair[0]], np.asarray(low_sample, dtype=float)))
+    )
+    pair[1] = np.nanmax(
+        np.concatenate(([pair[1]], np.asarray(high_sample, dtype=float)))
+    )
+
+
+def _add_mem_beam_diagram(
+    fig: plt.Figure,
+    hi: float,
+    *,
+    left: float | None = None,
+    bottom: float | None = None,
+    center_x: float | None = None,
+    bottom_frac: float = 0.0,
+    zorder: int | None = None,
+) -> plt.Axes:
+    """
+    Overlay the MEM beam numbering/pointing diagram on a figure and return
+    its axes.
+
+    Placement is either an explicit (left, bottom) figure-fraction rect
+    origin, or a center_x (horizontally centered on that figure fraction)
+    with a bottom measured as a fraction of the figure aspect ratio.
+    """
+    fw, fh = fig.get_figwidth(), fig.get_figheight()
+    fig_aspect_ratio = fw / fh
+    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
+    wi = hi * (mem_beam_img.shape[1] / mem_beam_img.shape[0]) / fig_aspect_ratio
+    if left is None:
+        left = (center_x - wi / 2) if center_x is not None else 0.0
+    if bottom is None:
+        bottom = bottom_frac * fig_aspect_ratio
+    img_axs: plt.Axes = fig.add_axes(rect=(left, bottom, wi, hi))
+    if zorder is None:
+        img_axs.imshow(mem_beam_img, aspect="auto")
+    else:
+        img_axs.imshow(mem_beam_img, aspect="auto", zorder=zorder)
+    img_axs.axis("off")
+    return img_axs
+
+
+def _setup_mlat_mlt_axes(lat_axs: plt.Axes) -> plt.Axes:
+    """
+    Configure a magnetic-latitude time axis with a twin magnetic-local-time
+    axis; return the twin axis.
+    """
+    lat_axs.grid(axis="both")
+    lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
+    lat_axs.set_xlabel("Time (UTC)", weight="bold")
+    mlt_axs = lat_axs.twinx()
+    mlt_axs.set_ylim(-0.5, 24.5)
+    mlt_axs.set_yticks(range(0, 25, 6))
+    mlt_axs.set_yticklabels(
+        ["Midnight", "Dawn", "Noon", "Dusk", "Midnight"], size="x-small"
+    )
+    mlt_axs.set_ylabel("Magnetic Local Time\n(APEX, hours)", weight="bold")
+    return mlt_axs
 
 
 def plot_update_required(
@@ -207,10 +527,7 @@ def coverage_plot_polar_layout(
             per-spacecraft axes (keyed by spacecraft index).
     """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     fig = plt.figure(figsize=ALTERNATE_FIG_SIZE)
     hndx = 0
@@ -260,13 +577,7 @@ def coverage_plot_polar_layout(
 
         # Add labels in MLT to the polar stereographic plot, with 0 at bottom (-y axis)
         mlt_locs = np.arange(0, 360.0, lon_delta)
-        mlt_desc = {}
-        for mm, mlt in enumerate(mlt_locs):
-            mlt_desc[f"{mlt:.0f}"] = f"{mlt / 15:02.0f}H"
-        mlt_desc["0"] = "Midnight"
-        mlt_desc["90"] = "Dawn"
-        mlt_desc["180"] = "Noon"
-        mlt_desc["270"] = "Dusk"
+        mlt_desc = {f"{mlt:.0f}": _mlt_label(mlt) for mlt in mlt_locs}
         for mm, mlt in enumerate(mlt_locs):
             mlt_pos = (ccw * mlt - 90.0) % 360.0  # Rotate to coord sys with 0 at x axis
             x = 0.5 + 0.55 * np.cos(np.radians(mlt_pos))
@@ -336,10 +647,7 @@ def coverage_plot_stereographic_layout(
             per-spacecraft axes (keyed by spacecraft index).
     """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
     # cartopy does NOT use these, adjust with gridlines artist below
     # plt.rcParams["xtick.labelsize"] = "small"
     # plt.rcParams["ytick.labelsize"] = "small"
@@ -460,10 +768,7 @@ def mollweide_layout(
             per-spacecraft axes (keyed by spacecraft index).
     """
     # Instantiate figure and axes for plotting - tweak some rcparams as needed
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
     # cartopy does NOT use these, adjust with gridlines artist below
     # plt.rcParams["xtick.labelsize"] = "small"
     # plt.rcParams["ytick.labelsize"] = "small"
@@ -586,10 +891,7 @@ def plot_geolocation(
         overwrite (bool, optional): Overwrite existing plot files; otherwise
             skip. Defaults to False.
     """
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     geo_group = nc_data.groups["Geolocation"]
     sc_id = nc_data.getncattr("SpaceVehicle")
@@ -603,24 +905,15 @@ def plot_geolocation(
     time_utc = time_utc[use_obs]
     plot_type = "geolocation"
 
-    ftgt, old_hash, new_hash = save_close_figure(
+    if _plot_needs_update(
         source=source,
         save_directory=save_directory,
         obs_date=obs_date,
+        plot_type=plot_type,
         spacecraft=sc_id,
         tstmp=t_stamp,
-        plot_type=plot_type,
-        name_only=True,
-    )
-    logger.debug(f"Checked file: {ftgt.as_posix()}")
-    if not plot_update_required(
-        source=source,
-        ftgt=ftgt,
-        plot_type="geolocation",
-        old_hash=old_hash,
-        new_hash=new_hash,
         overwrite=overwrite,
-    ):
+    ) is None:
         return
 
     # Prepare subplots for grouped geolocation parameters
@@ -698,15 +991,14 @@ def plot_geolocation(
         f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
         f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
     )
-    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
-    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(
+    _finalize_figure(
         fig=fig,
         nc_data=nc_data,
+        source=source,
+        title=fig_title,
         git_branch=git_branch,
         git_commit=git_commit,
     )
-    overlay_ezie_logo(fig)
     plt.subplots_adjust(
         left=0.06, right=0.98, bottom=0.07, top=0.93, wspace=0.12, hspace=0.01
     )
@@ -755,10 +1047,7 @@ def plot_ancillary(
         overwrite (bool, optional): Overwrite existing plot files; otherwise
             skip. Defaults to False.
     """
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     # Get time data and convert to datetime objects
     time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
@@ -770,24 +1059,16 @@ def plot_ancillary(
     sc_id = nc_data.getncattr("SpaceVehicle")
     plot_type = "ancillary"
 
-    ftgt, old_hash, new_hash = save_close_figure(
+    if _plot_needs_update(
         source=source,
         save_directory=save_directory,
         obs_date=obs_date,
+        plot_type=plot_type,
+        type_desc="ancillary (IGRF)",
         spacecraft=sc_id,
         tstmp=t_stamp,
-        plot_type=plot_type,
-        name_only=True,
-    )
-    logger.debug(f"Checked file: {ftgt.as_posix()}")
-    if not plot_update_required(
-        source=source,
-        ftgt=ftgt,
-        plot_type="ancillary (IGRF)",
-        old_hash=old_hash,
-        new_hash=new_hash,
         overwrite=overwrite,
-    ):
+    ) is None:
         return
 
     # Prepare figure for plotting with sharex and sharey
@@ -830,15 +1111,14 @@ def plot_ancillary(
         f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S UT')} - "
         f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S UT')}"
     )
-    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
-    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(
+    _finalize_figure(
         fig=fig,
         nc_data=nc_data,
+        source=source,
+        title=fig_title,
         git_branch=git_branch,
         git_commit=git_commit,
     )
-    overlay_ezie_logo(fig)
     plt.subplots_adjust(
         left=0.07,
         right=0.98,
@@ -897,10 +1177,7 @@ def plot_calibration(
         overwrite (bool, optional): Overwrite existing plot files; otherwise
             skip. Defaults to False.
     """
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     # Get time data and convert to datetime objects
     time_utc, obs_date = get_datetime_from_utc_string(
@@ -968,24 +1245,16 @@ def plot_calibration(
     for kk, t_kind in enumerate(t_kinds):
         t_kind_str = t_kind if not t_diff else f"{t_kind}_difference"
 
-        ftgt, old_hash, new_hash = save_close_figure(
+        if _plot_needs_update(
             source=source,
             save_directory=save_directory,
             obs_date=obs_date,
+            plot_type=f"{ckind}-{t_kind_str}",
+            type_desc=f"calibrated scene temperature ({t_kind})",
             spacecraft=sc_id,
             tstmp=t_stamp,
-            plot_type=f"{ckind}-{t_kind_str}",
-            name_only=True,
-        )
-        logger.debug(f"Checked file: {ftgt.as_posix()}")
-        if not plot_update_required(
-            source=source,
-            ftgt=ftgt,
-            plot_type=f"calibrated scene temperature ({t_kind})",
-            old_hash=old_hash,
-            new_hash=new_hash,
             overwrite=overwrite,
-        ):
+        ) is None:
             return
 
         fig, axs = plt.subplots(
@@ -1079,21 +1348,14 @@ def plot_calibration(
             f"{time_utc[0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
             f"{time_utc[-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
         )
-        fig.suptitle(
-            fig_title,
-            weight="bold",
-            fontsize="x-large",
-            y=0.99,
-            va="top",
-        )
-        add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-        add_pipeline_metadata(
+        _finalize_figure(
             fig=fig,
             nc_data=nc_data,
+            source=source,
+            title=fig_title,
             git_branch=git_branch,
             git_commit=git_commit,
         )
-        overlay_ezie_logo(fig)
         save_close_figure(
             source=source,
             save_directory=save_directory,
@@ -1146,10 +1408,7 @@ def plot_retrieved_bd_only(
     # mode (str, optional): Plot mode label, "Corrected" or "Uncorrected".
     #     Defaults to "Uncorrected".
     mode = "Corrected"  # FIXME - no longer using this with new CDL+retrieval algorithm
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     # Collate netcdf data for all spacecraft and orbits on the selected day and orbit.
 
@@ -1198,70 +1457,49 @@ def plot_retrieved_bd_only(
         plot_type = f"retrieved_{mode.lower()}_b_fields_dBs"
 
     logger.debug(f"spacecraft ID is {sc_id}")
-    ftgt, old_hash, new_hash = save_close_figure(
+    if _plot_needs_update(
         source=source,
         save_directory=save_directory,
         obs_date=obs_date,
+        plot_type=plot_type,
+        type_desc="retrieved B_d",
         spacecraft=sc_id,
         tstmp=t_stamp,
-        plot_type=plot_type,
-        name_only=True,
-    )
-    logger.debug(f"Checked file: {ftgt.as_posix()}")
-    if not plot_update_required(
-        source=source,
-        ftgt=ftgt,
-        plot_type="retrieved B_d",
-        old_hash=old_hash,
-        new_hash=new_hash,
         overwrite=overwrite,
-    ):
+    ) is None:
         return
 
     rtrvgrp = nc_data.groups["RetrievedParameters"]
     if "observation_valid" in rtrvgrp.variables:  # presence implies this is NEW format
         # TODO: Need to support dbmag or dbdown?
         algorithm = "mag"
-        mem_dbd_val = [f"RetrievedParameters/debiased_dbmag{mm}" for mm in MEM_NUMBERS]
-        mem_bdd_cov = [
-            f"RetrievedParameters/retrieved_dbmag_error{mm}" for mm in MEM_NUMBERS
-        ]
-        mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
+        dbd_tmpl = "debiased_dbmag"
+        cov_tmpl = "retrieved_dbmag_error"
     else:
         algorithm = "down"
         if mode.lower() == "corrected":
-            mem_dbd_val = [
-                f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS
-            ]
+            dbd_tmpl = "retrieved_dbgeod"
         else:
-            mem_dbd_val = [
-                f"RetrievedParameters/{mode.lower()}_retrieved_dbgeod{mm}"
-                for mm in MEM_NUMBERS
-            ]
-        mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
-        mem_cdd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_bdd_cov],))
+            dbd_tmpl = f"{mode.lower()}_retrieved_dbgeod"
+        cov_tmpl = "cov_dd"
+
+    # Stack MEM arrays so we can index and loop through them by number rather than
+    # using 4 separate variable names.
+    mem_dbd = _stack_mem_fields(nc_data, f"RetrievedParameters/{dbd_tmpl}")
+    mem_cdd = _stack_mem_fields(nc_data, f"RetrievedParameters/{cov_tmpl}")
+    if algorithm == "down":
         mem_cdd = np.sqrt(mem_cdd)  # Covariance is in nc4 files, not error
+    mag_lat = _stack_mem_fields(nc_data, "MagneticCoords/obs_maglat")
+    mag_ltm = _stack_mem_fields(nc_data, "MagneticCoords/obs_magLT")
+    obs_lat = _stack_mem_fields(nc_data, "Geolocation/obs_lat")
+    obs_lon = _stack_mem_fields(nc_data, "Geolocation/obs_lon")
 
-    mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
-    mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
-    mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
-    mem_mag_LTm = [f"MagneticCoords/obs_magLT{mm}" for mm in MEM_NUMBERS]
-
-    # Stack MEM arrays so we can index and loop through them by number rather than using
-    # 4 separate variable names.
-    mem_dbd = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_dbd_val],))
-    mag_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_lat],))
-    mag_ltm = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_mag_LTm],))
-    obs_lat = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lat],))
-    obs_lon = np.vstack((*[nc_data[nc_fld] for nc_fld in mem_obs_lon],))
-
-    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
-        missing_val = mem_dbd[mem_ndx, :] == NCDF_MISSING
-        mem_dbd[mem_ndx, missing_val] = np.nan
-        mag_lat[mem_ndx, missing_val] = np.nan
-        mag_ltm[mem_ndx, missing_val] = np.nan
-        obs_lat[mem_ndx, missing_val] = np.nan
-        obs_lon[mem_ndx, missing_val] = np.nan
+    missing_val = mem_dbd == NCDF_MISSING
+    mem_dbd = np.where(missing_val, np.nan, mem_dbd)
+    mag_lat = np.where(missing_val, np.nan, mag_lat)
+    mag_ltm = np.where(missing_val, np.nan, mag_ltm)
+    obs_lat = np.where(missing_val, np.nan, obs_lat)
+    obs_lon = np.where(missing_val, np.nan, obs_lon)
 
     valid_pnts = np.sum(~np.isnan(mem_dbd[0, :]))
     if valid_pnts < 3:
@@ -1298,21 +1536,7 @@ def plot_retrieved_bd_only(
     col = 0
     axs[-1, 1].set_visible(False)
     lat_axs = axs[-1, col]
-    lat_axs.grid(axis="both")
-    lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
-    lat_axs.set_xlabel("Time (UTC)", weight="bold")
-    mlt_axs = lat_axs.twinx()
-    mlt_axs.set_ylim(-0.5, 24.5)
-    mlt_axs.set_yticks(range(0, 25, 6))
-    mlt_lbl = [
-        "Midnight",
-        "Dawn",
-        "Noon",
-        "Dusk",
-        "Midnight",
-    ]
-    mlt_axs.set_yticklabels(mlt_lbl, size="x-small")
-    mlt_axs.set_ylabel("Magnetic Local Time\n(APEX, hours)", weight="bold")
+    mlt_axs = _setup_mlat_mlt_axes(lat_axs)
     for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
         row = PLT_NDX[mem_ndx]
         mem_axs = axs[row, col]
@@ -1348,13 +1572,10 @@ def plot_retrieved_bd_only(
             zorder=3,
         )
         try:
-            b_rng[0] = np.nanmin(
-                list(b_rng[0:1])
-                + list(mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs])
-            )
-            b_rng[1] = np.nanmax(
-                list(b_rng[1:2])
-                + list(mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs])
+            _update_range(
+                b_rng,
+                mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs],
+                mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs],
             )
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
@@ -1398,14 +1619,14 @@ def plot_retrieved_bd_only(
             )
 
     # Adjust axis y limits to be uniform for a given field component across all MEMs
-    for mem_ndx in [x - 1 for x in MEM_NUMBERS]:
+    for mem_ndx in range(NUM_MEM):
         mem_axs = axs[PLT_NDX[mem_ndx], col]
         tot_rng = b_rng[1] - b_rng[0]
         logger.debug(f"{b_rng[0]} : {b_rng[1]}")
         # FIXME - kludge to use old L2 file - comment out line below
         try:
             mem_axs.set_ylim(
-                b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
+                (b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng)
             )
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
@@ -1436,23 +1657,8 @@ def plot_retrieved_bd_only(
     lat_at_midpt = nc_data["Geolocation/sat_lat"][midpt]
     lon_at_midpt = nc_data["Geolocation/sat_lon"][midpt]
 
-    if lat_at_midpt > +40:  # hemisphere = NORTH
-        hemisphere = NORTH
-    elif lat_at_midpt < -40:  # hemisphere = SOUTH
-        hemisphere = SOUTH
-    else:
-        hemisphere = None
-
-    if hemisphere == NORTH:
-        proj_method = ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
-    elif hemisphere == SOUTH:
-        proj_method = ccrs.SouthPolarStereo(central_longitude=180)
-        if south_inverted:
-            MLT_sign = -1
-    else:
-        proj_method = ccrs.Orthographic(
-            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
-        )
+    hemisphere = _select_hemisphere(lat_at_midpt)
+    proj_method = _inset_map_projection(hemisphere, lat_at_midpt, lon_at_midpt)
 
     maprowspan, mapcolspan = 3, 1  # 5 rows for geographic coordinate inset
     map_axs: GeoAxes = plt.subplot2grid(
@@ -1473,19 +1679,7 @@ def plot_retrieved_bd_only(
     midpoint = dtlim[0] + datetime.timedelta(seconds=int(0.5 * duration))
 
     # Get solar position, first in geodetic and then in APEX magnetic coordinates.
-    sun_geo_tuple_rad = []
-
-    # Geodetic
-    for tndx, tutc in enumerate(time_utc):
-        tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
-        (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
-            "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
-        )
-        sun_geo_tuple_rad.append(
-            spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
-        )  # Fix the subsolar point on the surface in geodetic coordinates
-    sun_geo_lon_deg = np.array([np.degrees(x[0]) for x in sun_geo_tuple_rad])
-    sun_geo_lat_deg = np.array([np.degrees(x[1]) for x in sun_geo_tuple_rad])
+    sun_geo_lon_deg, sun_geo_lat_deg = _subsolar_geodetic(time_utc)
 
     # Compute the subsolar point in APEX magnetic coordinates
     apex = Apex(date=midpoint.year, refh=0)
@@ -1561,23 +1755,7 @@ def plot_retrieved_bd_only(
         )
 
     # Add MEM beam numbering/pointing diagram at bottom right corner of figure
-    fw = fig.get_figwidth()
-    fh = fig.get_figheight()
-    fig_aspect_ratio = fw / fh
-    # ll, bb, ww, hh = map_axs.get_position().bounds
-    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
-    img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
-    hi = 0.29
-    wi = hi * img_aspect_ratio / fig_aspect_ratio
-    # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
-    img_axs: plt.Axes = fig.add_axes(
-        rect=(0.76 - wi / 2, 0.025 * fig_aspect_ratio, wi, hi)
-    )
-    img_axs.imshow(mem_beam_img, aspect="auto")
-    # Just turn ticks off so we get a border around image.
-    # img_axs.set_xticks([])
-    # img_axs.set_yticks([])
-    img_axs.axis("off")
+    _add_mem_beam_diagram(fig, hi=0.29, center_x=0.76, bottom_frac=0.025)
 
     # Tweak position and add any figure-level annotation
     fig_title = f"{mode} Retrieved Magnetic Field Deltas: "
@@ -1586,10 +1764,12 @@ def plot_retrieved_bd_only(
         f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
         f"{time_utc[use_obs][-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
     )
-    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
-    add_product_metadata(fig=fig, nc_data=nc_data, source=source)
-    add_pipeline_metadata(fig=fig, nc_data=nc_data)
-    overlay_ezie_logo(fig)
+    _finalize_figure(
+        fig=fig,
+        nc_data=nc_data,
+        source=source,
+        title=fig_title,
+    )
     plt.subplots_adjust(
         left=0.06,
         right=0.99,
@@ -1906,25 +2086,7 @@ def map_sc_mem_footprints_magnetic(
             "color": "white" if not dark_mode else DARK_MODE_FACE_COLOR,
         }  # Suppress longitudes, we'll add MLT ourselves
         mlt_locs = np.arange(0, 360.0, lon_delta)
-        mlt_desc = {}
-        mlt_ha = {}
-        mlt_va = {}
-        for mm, mlt in enumerate(mlt_locs):
-            mlt_desc[f"{mlt:.0f}"] = f"{mlt / 15:02.0f}H"
-            mlt_ha[f"{mlt:.0f}"] = "center"
-            mlt_va[f"{mlt:.0f}"] = "center"
-        mlt_desc["0"] = "Midnight"
-        mlt_desc["90"] = "Dawn"
-        mlt_desc["180"] = "Noon"
-        mlt_desc["270"] = "Dusk"
-        mlt_ha["0"] = "center"
-        mlt_ha["90"] = "center"
-        mlt_ha["180"] = "center"
-        mlt_ha["270"] = "center"
-        mlt_va["0"] = "center"
-        mlt_va["90"] = "center"
-        mlt_va["180"] = "center"
-        mlt_va["270"] = "center"
+        mlt_desc = {f"{mlt:.0f}": _mlt_label(mlt) for mlt in mlt_locs}
 
         for mm, mlt in enumerate(mlt_locs):
             mlt_pos = (ccw * mlt - 90.0) % 360.0  # Rotate to coord sys with 0 at x axis
@@ -1936,8 +2098,8 @@ def map_sc_mem_footprints_magnetic(
                 mlt_desc[f"{mlt:.0f}"],
                 transform=map_axs.transAxes,
                 color="black" if not dark_mode else DARK_MODE_GRID_COLOR,
-                va=mlt_va[f"{mlt:.0f}"],
-                horizontalalignment=mlt_ha[f"{mlt:.0f}"],
+                va="center",
+                horizontalalignment="center",
             )
 
     elif geo_labels and not (south_inverted and (hemisphere == SOUTH)):
@@ -2153,15 +2315,9 @@ def l3_map(
         else:
             ccw = -1  # SOUTH and not south_inverted case only
 
-        mlt_desc = {}
         lon_delta = 30.0
         mlt_angs = np.arange(0, 360.0, lon_delta)
-        for mm, mlt in enumerate(mlt_angs):
-            mlt_desc[f"{mlt:.0f}"] = f"{mlt / 15:02.0f}H"
-        mlt_desc["0"] = "Midnight"
-        mlt_desc["90"] = "Dawn"
-        mlt_desc["180"] = "Noon"
-        mlt_desc["270"] = "Dusk"
+        mlt_desc = {f"{mlt:.0f}": _mlt_label(mlt) for mlt in mlt_angs}
 
         xp_m, yp_m = l3_map_axs.transAxes.inverted().transform(
             l3_map_axs.transData.transform(
@@ -2423,32 +2579,26 @@ def plot_b_1D_maps_with_time(
     start = time.perf_counter()
     prsd = parse_ezie_product_name(source=source)
     plot_type: str = "l3-l2"
+    obs_date = datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
+        tzinfo=datetime.UTC
+    )
 
     # See if this figure already exists.
     # Do NOT remake an existing figure unless the overwrite flag is set.
-    ftgt, old_hash, new_hash = save_close_figure(
+    ftgt = _plot_needs_update(
         source=source,
         save_directory=save_directory,
-        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
-            tzinfo=datetime.UTC
-        ),
+        obs_date=obs_date,
+        plot_type=plot_type,
+        type_desc="L3 retrieved B_d and current",
         spacecraft=prsd.spcv,
         tstmp=prsd.time,
-        plot_type=plot_type,
         dpi=figure_dpi,
         dark_mode=dark_mode,
         old_format=old_format,
-        name_only=True,
-    )
-    logger.debug(f"Checked file: {ftgt.as_posix()}")
-    if not plot_update_required(
-        source=source,
-        ftgt=ftgt,
-        plot_type="L3 retrieved B_d and current",
-        old_hash=old_hash,
-        new_hash=new_hash,
         overwrite=overwrite,
-    ):
+    )
+    if ftgt is None:
         return
 
     try:
@@ -2474,12 +2624,8 @@ def plot_b_1D_maps_with_time(
 
     # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
     # gridlines, play with the map projection as needed.
-    if lat_at_midpt > +40:  # hemisphere = NORTH
-        hemisphere = NORTH
-    elif lat_at_midpt < -40:  # hemisphere = SOUTH
-        hemisphere = SOUTH
-    else:
-        hemisphere = None
+    hemisphere = _select_hemisphere(lat_at_midpt)
+    if hemisphere is None:
         logger.warning(f"L3 file appears to contain EEJ pass, skipping: {source.name}")
         return
 
@@ -2509,22 +2655,10 @@ def plot_b_1D_maps_with_time(
     # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
     # display projected geodetic coordinates for now, pending addition of magnetic
     # coordinate counterparts to the L3 files.
-    sun_geo_tuple_rad = []
 
     # Compute position of sun in both geodetic and geomagnetic coordinates for the
     # observation midpoint time.
-    tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
-    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
-        "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
-    )
-    # Get the subsolar point on the surface in geodetic coordinates
-    sun_geo_tuple_rad = spiceypy.recgeo(
-        subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING
-    )
-    sun_geo_lon_mid = np.degrees(sun_geo_tuple_rad[0])
-    sun_geo_lat_mid = np.degrees(sun_geo_tuple_rad[1])
-    if sun_geo_lon_mid > 180.0:
-        sun_geo_lon_mid -= 360.0
+    sun_geo_lon_mid, sun_geo_lat_mid = _subsolar_geodetic_at(time_utc[midpt])
 
     # Compute the subsolar point in APEX magnetic coordinates
     apex = Apex(
@@ -2537,36 +2671,13 @@ def plot_b_1D_maps_with_time(
         REFERENCE_ALTITUDE_KM,
     )
 
-    # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
-    # to be the ACTUAL mlats for APEX, with sign appropriate for the selected hemisphere
-    # regardless of any projection tricks we might apply. 'MLT_sign' is used to "trick"
-    # cartopy into plotting the southern hemisphere in an inverted/transparent earth
-    # format used for heliophysics, where we look down at the SOUTH pole from above the
-    # NORTH pole, as if the earth were transparent. This 'south_inverted' format keeps
-    # Noon, Dawn, etc. in the same relative positions and orientation for both
-    # hemispheres. To get the south_inverted projection we apply the MLT_sign multiplier
-    # (-1 for this case) to the "projected" quantitites. Latitudes retain their normal
-    # hemisphere-appropriate sense.
-    MLT_sign = +1
-    if hemisphere == NORTH:
-        lats_m = np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        map_proj = ccrs.NorthPolarStereo(
-            central_longitude=sun_geo_lon_mid + 180,
-            true_scale_latitude=+60,
-        )
-    elif hemisphere == SOUTH:
-        lats_m = -1 * np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        if south_inverted:
-            MLT_sign = -1
-        map_proj = ccrs.SouthPolarStereo(
-            central_longitude=MLT_sign * sun_geo_lon_mid,
-            true_scale_latitude=-60,
-        )
-    else:
-        lats_m = np.arange(-GEO_LAT_LOWER_LIMIT, +GEO_LAT_LOWER_LIMIT, 10.0)
-        map_proj = ccrs.Stereographic(
-            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
-        )
+    lats_m, MLT_sign, map_proj = _make_l3_projection(
+        hemisphere,
+        sun_geo_lon_mid,
+        lat_at_midpt,
+        lon_at_midpt,
+        south_inverted,
+    )
 
     # Set up figure and projection for cartopy
     fig = plt.figure(num=prsd.time, figsize=(9.6, 8.0))
@@ -2597,28 +2708,22 @@ def plot_b_1D_maps_with_time(
         show_b_value=show_b_value,
     )
 
-    fig.suptitle(
-        (
-            f"L3 and L2: EZIE-{prsd.spcv.upper()} \n"
-            f"{time_utc[0].strftime('%B %d, %Y %H:%M:%S')} - "
-            f"{time_utc[-1].strftime('%H:%M:%S')}\n"
-        ),
-        y=0.99,
-        va="top",
-        fontsize="x-large",
-        fontweight="bold",
+    fig_title = (
+        f"L3 and L2: EZIE-{prsd.spcv.upper()} \n"
+        f"{time_utc[0].strftime('%B %d, %Y %H:%M:%S')} - "
+        f"{time_utc[-1].strftime('%H:%M:%S')}\n"
     )
-    plt.tight_layout()  # pad=0)
-    plt.subplots_adjust(top=0.860, bottom=0.060)  # Modify tight_layout results slightly
-
-    add_product_metadata(fig=fig, nc_data=nc_data, source=source, size="x-small")
-    add_pipeline_metadata(
+    _finalize_figure(
         fig=fig,
         nc_data=nc_data,
+        source=source,
+        title=fig_title,
         git_branch=git_branch,
         git_commit=git_commit,
         size="x-small",
     )
+    plt.tight_layout()  # pad=0)
+    plt.subplots_adjust(top=0.860, bottom=0.060)  # Modify tight_layout results slightly
 
     if hemisphere is not None:
         subtitle = (
@@ -2643,15 +2748,12 @@ def plot_b_1D_maps_with_time(
         fontweight="bold",
         # transform=map_axs.transAxes,
     )
-    overlay_ezie_logo(fig)
 
     save_close_figure(
         source=source,
         save_directory=save_directory,
         figure=fig,
-        obs_date=datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
-            tzinfo=datetime.UTC
-        ),
+        obs_date=obs_date,
         spacecraft=prsd.spcv,
         tstmp=prsd.time,
         plot_type=plot_type,
@@ -2722,10 +2824,7 @@ def plot_retrieved_B_and_J(
         )
         return
 
-    if dark_mode:
-        plt.style.use("dark_background")
-        plt.rcParams["savefig.facecolor"] = DARK_MODE_FACE_COLOR
-        plt.rcParams["axes.facecolor"] = DARK_MODE_FILL_COLOR
+    _apply_dark_mode(dark_mode)
 
     # Collate netcdf data for all spacecraft and orbits on the selected day and orbit.
 
@@ -2764,68 +2863,50 @@ def plot_retrieved_B_and_J(
     ave_win = min(AVERAGING_WINDOW, num_tim)
 
     # Extract MEM retrieved dBs, geolocation and magnetic coordinates, covariance fields
-    mem_db_val = [f"RetrievedParameters/retrieved_dbgeod{mm}" for mm in MEM_NUMBERS]
     plot_type = "retrieved_b_and_j"
 
-    ftgt, old_hash, new_hash = save_close_figure(
+    ftgt = _plot_needs_update(
         source=nc2_sorc,
         save_directory=save_directory,
         obs_date=obs_date,
+        plot_type=plot_type,
+        type_desc="retrieved B field dBs",
         spacecraft=sc_id,
         tstmp=t_stamp,
-        plot_type=plot_type,
-        name_only=True,
-    )
-    logger.debug(f"Checked file: {ftgt.as_posix()}")
-
-    if not plot_update_required(
-        source=nc2_sorc,
-        ftgt=ftgt,
-        plot_type="retrieved B field dBs",
-        old_hash=old_hash,
-        new_hash=new_hash,
         overwrite=overwrite,
-    ):
+    )
+    if ftgt is None:
         return
 
     rtrvgrp = nc2_data.groups["RetrievedParameters"]
     if "observation_valid" in rtrvgrp.variables:  # NEW format
         # TODO: Need to support dbmag or dbdown?
-        mem_db_str = "RetrievedParameters/debiased_dbmag"
-        mem_db_val = [f"{mem_db_str}{mm}" for mm in MEM_NUMBERS]
-        mem_db_err = [
-            f"RetrievedParameters/retrieved_dbmag_error{mm}" for mm in MEM_NUMBERS
-        ]
-        mem_err = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_db_err],))
+        dbd_tmpl = "debiased_dbmag"
+        cov_tmpl = "retrieved_dbmag_error"
         algorithm = "mag"
     else:
-        mem_db_str = "RetrievedParameters/retrieved_dbgeod"
-        mem_db_val = [f"{mem_db_str}{mm}" for mm in MEM_NUMBERS]
-        mem_bdd_cov = [f"RetrievedParameters/cov_dd{mm}" for mm in MEM_NUMBERS]
-        mem_err = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_bdd_cov],))
-        mem_err = np.sqrt(mem_err)  # Covariance is in nc4 files, not error
+        dbd_tmpl = "retrieved_dbgeod"
+        cov_tmpl = "cov_dd"
         algorithm = "down"
+    mem_db_str = f"RetrievedParameters/{dbd_tmpl}"
 
-    mem_obs_lat = [f"Geolocation/obs_lat{mm}" for mm in MEM_NUMBERS]
-    mem_obs_lon = [f"Geolocation/obs_lon{mm}" for mm in MEM_NUMBERS]
-    mem_mag_lat = [f"MagneticCoords/obs_maglat{mm}" for mm in MEM_NUMBERS]
-    mem_mag_LTm = [f"MagneticCoords/obs_magLT{mm}" for mm in MEM_NUMBERS]
+    # Stack MEM arrays so we can index and loop through them by number rather than
+    # using 4 separate variable names.
+    mem_dbd = _stack_mem_fields(nc2_data, mem_db_str)
+    mem_err = _stack_mem_fields(nc2_data, f"RetrievedParameters/{cov_tmpl}")
+    if algorithm == "down":
+        mem_err = np.sqrt(mem_err)  # Covariance is in nc4 files, not error
+    mag_lat = _stack_mem_fields(nc2_data, "MagneticCoords/obs_maglat")
+    mag_ltm = _stack_mem_fields(nc2_data, "MagneticCoords/obs_magLT")
+    obs_lat = _stack_mem_fields(nc2_data, "Geolocation/obs_lat")
+    obs_lon = _stack_mem_fields(nc2_data, "Geolocation/obs_lon")
 
-    # Stack MEM arrays so we can index and loop through them by number rather than using
-    # 4 separate variable names.
-    mem_dbd = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_db_val],))
-    mag_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_lat],))
-    mag_ltm = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_mag_LTm],))
-    obs_lat = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_obs_lat],))
-    obs_lon = np.vstack((*[nc2_data[nc_fld] for nc_fld in mem_obs_lon],))
-
-    for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
-        missing_val = mem_dbd[mem_ndx, :] == NCDF_MISSING
-        mem_dbd[mem_ndx, missing_val] = np.nan
-        mag_lat[mem_ndx, missing_val] = np.nan
-        mag_ltm[mem_ndx, missing_val] = np.nan
-        obs_lat[mem_ndx, missing_val] = np.nan
-        obs_lon[mem_ndx, missing_val] = np.nan
+    missing_val = mem_dbd == NCDF_MISSING
+    mem_dbd = np.where(missing_val, np.nan, mem_dbd)
+    mag_lat = np.where(missing_val, np.nan, mag_lat)
+    mag_ltm = np.where(missing_val, np.nan, mag_ltm)
+    obs_lat = np.where(missing_val, np.nan, obs_lat)
+    obs_lon = np.where(missing_val, np.nan, obs_lon)
 
     valid_pnts = np.sum(~np.isnan(mem_dbd[0, :]))
     if valid_pnts < 3:
@@ -2872,12 +2953,8 @@ def plot_retrieved_B_and_J(
 
         # Add magnetic coordinate overlay, select latitudes at which to draw magnetic
         # gridlines, play with the map projection as needed.
-        if lat_at_midpt > +40:  # hemisphere = NORTH
-            hemisphere = NORTH
-        elif lat_at_midpt < -40:  # hemisphere = SOUTH
-            hemisphere = SOUTH
-        else:
-            hemisphere = None
+        hemisphere = _select_hemisphere(lat_at_midpt)
+        if hemisphere is None:
             logger.warning(
                 f"L3 file appears to contain EEJ pass, skipping: {nc3_sorc.as_posix()}"
             )
@@ -2911,21 +2988,10 @@ def plot_retrieved_B_and_J(
     # Get solar position, first in geodetic and then in APEX magnetic coordinates. We'll
     # display projected geodetic coordinates for now, pending addition of magnetic
     # coordinate counterparts to the L3 files.
-    sun_geo_tuple_rad = []
 
     # Compute position of sun in both geodetic and geomagnetic coordinates for the
     # observation midpoint time.
-    tdb = spiceypy.utc2et(time_utc[midpt].isoformat()[:-6])
-    (subpnt, _epoch, _to_subpnt) = spiceypy.subslr(
-        "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
-    )
-    # Get the subsolar point on the surface in geodetic coordinates.
-    sun_geo_tuple_rad = spiceypy.recgeo(
-        subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING
-    )
-    sun_geo_lon_mid = np.degrees(sun_geo_tuple_rad[0])
-    if sun_geo_lon_mid > 180.0:
-        sun_geo_lon_mid -= 360.0
+    sun_geo_lon_mid, _sun_geo_lat_mid = _subsolar_geodetic_at(time_utc[midpt])
 
     # Save for potential later use?
     # Compute the subsolar point in APEX magnetic coordinates
@@ -2939,36 +3005,13 @@ def plot_retrieved_B_and_J(
     #     reference_altitude_km,
     # )
 
-    # 'lats_m' are the magnetic latitudes at which we'll overlay parallels. These need
-    # to be the ACTUAL mlats for APEX, with sign appropriate for the selected hemisphere
-    # regardless of any projection tricks we might apply. 'MLT_sign' is used to "trick"
-    # cartopy into plotting the southern hemisphere in an inverted/transparent earth
-    # format used for heliophysics, where we look down at the SOUTH pole from above the
-    # NORTH pole, as if the earth were transparent. This 'south_inverted' format keeps
-    # Noon, Dawn, etc. in the same relative positions and orientation for both
-    # hemispheres. To get the south_inverted projection we apply the MLT_sign multiplier
-    # (-1 for this case) to the "projected" quantitites. Latitudes retain their normal
-    # hemisphere-appropriate sense.
-    MLT_sign = +1
-    if hemisphere == NORTH:
-        lats_m = np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        map_proj = ccrs.NorthPolarStereo(
-            central_longitude=sun_geo_lon_mid + 180,
-            true_scale_latitude=+60,
-        )
-    elif hemisphere == SOUTH:
-        lats_m = -1 * np.arange(MAG_LAT_LOWER_LIMIT, 90.0, 10.0)
-        if south_inverted:
-            MLT_sign = -1
-        map_proj = ccrs.SouthPolarStereo(
-            central_longitude=MLT_sign * sun_geo_lon_mid,
-            true_scale_latitude=-60,
-        )
-    else:
-        lats_m = np.arange(-GEO_LAT_LOWER_LIMIT, +GEO_LAT_LOWER_LIMIT, 10.0)
-        map_proj = ccrs.Stereographic(
-            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
-        )
+    lats_m, MLT_sign, map_proj = _make_l3_projection(
+        hemisphere,
+        sun_geo_lon_mid,
+        lat_at_midpt,
+        lon_at_midpt,
+        south_inverted,
+    )
 
     # Set up axis and projection for cartopy
     maprowspan, mapcolspan = 2, 2  # 5 rows for geographic coordinate inset
@@ -3062,9 +3105,7 @@ def plot_retrieved_B_and_J(
     b_rng = np.full((2), fill_value=np.nan)  # 4 B x [min,max]
 
     lat_axs = axs[-1]
-    lat_axs.grid(axis="both")
-    lat_axs.set_ylabel("Magnetic Latitude\n(APEX, degrees)", weight="bold")
-    lat_axs.set_xlabel("Time (UTC)", weight="bold")
+    mlt_axs = _setup_mlat_mlt_axes(lat_axs)
     lat_axs.text(
         x=-0.05,
         y=-0.19,
@@ -3074,18 +3115,6 @@ def plot_retrieved_B_and_J(
         va="top",
         weight="bold",
     )
-    mlt_axs = lat_axs.twinx()
-    mlt_axs.set_ylim(-0.5, 24.5)
-    mlt_axs.set_yticks(range(0, 25, 6))
-    mlt_lbl = [
-        "Midnight",
-        "Dawn",
-        "Noon",
-        "Dusk",
-        "Midnight",
-    ]
-    mlt_axs.set_yticklabels(mlt_lbl, size="x-small")
-    mlt_axs.set_ylabel("Magnetic Local Time\n(APEX, hours)", weight="bold")
     for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
         row = PLT_NDX[mem_ndx]
         mem_axs = axs[row]
@@ -3144,13 +3173,10 @@ def plot_retrieved_B_and_J(
         )
 
         try:
-            b_rng[0] = np.nanmin(
-                list(b_rng[0:1])
-                + list(mem_dbd[mem_ndx][use_obs] - mem_err[mem_ndx][use_obs])
-            )
-            b_rng[1] = np.nanmax(
-                list(b_rng[1:2])
-                + list(mem_dbd[mem_ndx][use_obs] + mem_err[mem_ndx][use_obs])
+            _update_range(
+                b_rng,
+                mem_dbd[mem_ndx][use_obs] - mem_err[mem_ndx][use_obs],
+                mem_dbd[mem_ndx][use_obs] + mem_err[mem_ndx][use_obs],
             )
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
@@ -3191,14 +3217,14 @@ def plot_retrieved_B_and_J(
             )
 
     # Adjust axis y limits to be uniform for a given field component across all MEMs
-    for mem_ndx in [x - 1 for x in MEM_NUMBERS]:
+    for mem_ndx in range(NUM_MEM):
         mem_axs = axs[PLT_NDX[mem_ndx]]
         tot_rng = b_rng[1] - b_rng[0]
         logger.debug(f"{b_rng[0]} : {b_rng[1]}")
         # FIXME - kludge to use old L2 file - comment out line below
         try:
             mem_axs.set_ylim(
-                b_rng[i] + tot_rng * x for i, x in enumerate([-0.05, +0.05])
+                (b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng)
             )
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
@@ -3230,23 +3256,8 @@ def plot_retrieved_B_and_J(
     lat_at_midpt = nc2_data["Geolocation/sat_lat"][midpt]
     lon_at_midpt = nc2_data["Geolocation/sat_lon"][midpt]
 
-    if lat_at_midpt > +40:  # hemisphere = NORTH
-        hemisphere = NORTH
-    elif lat_at_midpt < -40:  # hemisphere = SOUTH
-        hemisphere = SOUTH
-    else:
-        hemisphere = None
-
-    if hemisphere == NORTH:
-        proj_method = ccrs.NorthPolarStereo(central_longitude=0)  # 0 is default
-    elif hemisphere == SOUTH:
-        proj_method = ccrs.SouthPolarStereo(central_longitude=180)
-        if south_inverted:
-            MLT_sign = -1
-    else:
-        proj_method = ccrs.Orthographic(
-            central_latitude=lat_at_midpt, central_longitude=lon_at_midpt
-        )
+    hemisphere = _select_hemisphere(lat_at_midpt)
+    proj_method = _inset_map_projection(hemisphere, lat_at_midpt, lon_at_midpt)
 
     maprowspan, mapcolspan = 2, 2  # 5 rows for geographic coordinate inset
     fp_map_axs: GeoAxes = plt.subplot2grid(
@@ -3269,19 +3280,7 @@ def plot_retrieved_B_and_J(
     midpoint = dtlim[0] + datetime.timedelta(seconds=int(0.5 * duration))
 
     # Get solar position, first in geodetic and then in APEX magnetic coordinates.
-    sun_geo_tuple_rad = []
-
-    # Geodetic
-    for tndx, tutc in enumerate(time_utc):
-        tdb = spiceypy.utc2et(tutc.isoformat()[:-6])
-        (subpnt, epoch, to_subpnt) = spiceypy.subslr(  # noqa: RUF059
-            "INTERCEPT/ELLIPSOID", "EARTH", tdb, "IAU_EARTH", "LT+S", "EARTH"
-        )
-        sun_geo_tuple_rad.append(
-            spiceypy.recgeo(subpnt, EARTH_RADIUS_EQUATORIAL, EARTH_FLATTENING)
-        )  # Fix the subsolar point on the surface in geodetic coordinates
-    sun_geo_lon_deg = np.array([np.degrees(x[0]) for x in sun_geo_tuple_rad])
-    sun_geo_lat_deg = np.array([np.degrees(x[1]) for x in sun_geo_tuple_rad])
+    sun_geo_lon_deg, sun_geo_lat_deg = _subsolar_geodetic(time_utc)
 
     # Compute the subsolar point in APEX magnetic coordinates
     apex = Apex(date=midpoint.year, refh=0)
@@ -3358,21 +3357,8 @@ def plot_retrieved_B_and_J(
         )
 
     # Add MEM beam numbering/pointing diagram at bottom right corner of figure
-    fw = fig.get_figwidth()
-    fh = fig.get_figheight()
-    fig_aspect_ratio = fw / fh
-    mem_beam_img = plt.imread(MEM_BEAM_DIAGRAM_PATH)
-    img_aspect_ratio = mem_beam_img.shape[1] / mem_beam_img.shape[0]
-    hi = 0.22
-    wi = hi * img_aspect_ratio / fig_aspect_ratio
-    beamsx, beamsy = 0.62, 0.44 - hi / 2
-    # img_axs = fig.add_axes([0.975 - wi, 0.025 * fig_aspect_ratio, wi, hi])  # LR
-    img_axs: plt.Axes = fig.add_axes(rect=(beamsx, beamsy, wi, hi))
-    img_axs.imshow(mem_beam_img, aspect="auto", zorder=3)
-    # Just turn ticks off so we get a border around image.
-    # img_axs.set_xticks([])
-    # img_axs.set_yticks([])
-    img_axs.axis("off")
+    _add_mem_beam_diagram(fig, hi=0.22, left=0.62, bottom=0.44 - 0.22 / 2, zorder=3)
+
     # Tweak position and add any figure-level annotation
     fig_title = "Magnetic Field Perturbations and Currents: "
     fig_title = fig_title + (
@@ -3380,14 +3366,18 @@ def plot_retrieved_B_and_J(
         f"{time_utc[use_obs][0].strftime('%Y-%m-%d (%j) %H:%M:%S')} - "
         f"{time_utc[use_obs][-1].strftime('%Y-%m-%d (%j) %H:%M:%S')}"
     )
-    fig.suptitle(fig_title, weight="bold", fontsize="x-large", y=0.99, va="top")
-    add_product_metadata(fig=fig, nc_data=nc2_data, source=nc2_sorc, size="x-small")
+    _finalize_figure(
+        fig=fig,
+        nc_data=nc2_data,
+        source=nc2_sorc,
+        title=fig_title,
+        size="x-small",
+        dark_mode=dark_mode,
+    )
     with Dataset(nc3_sorc, mode="r") as nc3_data:
         add_product_metadata(
             fig=fig, nc_data=nc3_data, source=nc3_sorc, second=True, size="x-small"
         )
-    add_pipeline_metadata(fig=fig, nc_data=nc2_data, size="x-small")
-    overlay_ezie_logo(fig=fig, dark_mode=dark_mode)
     plt.subplots_adjust(
         left=0.06,
         right=0.99,
