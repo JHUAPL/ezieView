@@ -19,6 +19,48 @@ from pathlib import Path
 # endregion
 
 
+def _log_format(
+    bare: bool,
+    jupyter: bool,
+    using_imports: bool,
+    multiproc: bool,
+) -> str:
+    """
+    Select the log message format string for the requested application type.
+    """
+    if bare:
+        # Message-only logging, like print
+        return "%(message)s"
+    if jupyter and not using_imports:
+        # Skip filename and funcName fields for self-contained notebooks
+        return (
+            "%(asctime)s "
+            "%(levelname)8s "
+            "[%(lineno)4i] "
+            "%(message)s"
+        )
+    if multiproc:
+        # Thread and process identifiers are only useful for multi-threaded or
+        # multi-process applications
+        return (
+            "%(asctime)s "
+            "%(levelname)8s "
+            "[%(filename)24s: %(lineno)4i] "
+            "%(funcName)-29s "
+            "%(threadName)-20s "
+            "%(process)-6d "
+            "%(processName)-18s "
+            "%(message)s"
+        )
+    return (
+        "%(asctime)s "
+        "%(levelname)8s "
+        "[%(filename)24s: %(lineno)4i] "
+        "%(funcName)-29s "
+        "%(message)s"
+    )
+
+
 def initialize_logging(
     log_to_file: bool = False,
     log_folder: str = "./logs",
@@ -68,51 +110,19 @@ def initialize_logging(
     """
 
     # Format logging messages to suit application.
-    if bare:
-        log_fmt_str = "%(message)s"
-    elif jupyter and not using_imports:
-        log_fmt_str = (
-            "%(asctime)s "
-            "%(levelname)8s "
-            "[%(lineno)4i] "
-            "%(message)s"
-        )  # skip filename and funcName fields for self-contained notebooks
-    elif multiproc:
-        # These fields are only useful for multi-threaded or multi-process applications
-        # -- and logging multi-process applications opens its own can of worms.
-        log_fmt_str = (
-            "%(asctime)s "
-            "%(levelname)8s "
-            "[%(filename)24s: %(lineno)4i] "
-            "%(funcName)-29s "
-            "%(threadName)-20s "
-            "%(process)-6d "
-            "%(processName)-18s "
-            "%(message)s"
-        )
-    else:
-        log_fmt_str = (
-            "%(asctime)s "
-            "%(levelname)8s "
-            "[%(filename)24s: %(lineno)4i] "
-            "%(funcName)-29s "
-            "%(message)s"
-        )
+    log_fmt_str = _log_format(
+        bare=bare,
+        jupyter=jupyter,
+        using_imports=using_imports,
+        multiproc=multiproc,
+    )
 
     # Set up log path, with the option to log to a single daily log file that rotates at
     # midnight UTC, e.g., for ongoing data pipeline use.
     if log_to_file:
         lf_path = Path(log_folder)
-        if not lf_path.exists():
-            lf_path.mkdir(parents=True, exist_ok=True)
+        lf_path.mkdir(parents=True, exist_ok=True)
 
-        # Old version
-        # try:
-        #     basename = Path(sys.modules["__main__"].__file__).stem
-        # except AttributeError:
-        #     basename = "Jupyter_Notebook"
-
-        # New version
         main_script = sys.modules["__main__"]
         if hasattr(main_script, "__file__"):
             # If there is a __file__ attribute, use it for the log file name
@@ -145,7 +155,6 @@ def initialize_logging(
             handler = logging.FileHandler(filename=log_file, mode="w")
     else:
         handler = logging.StreamHandler(sys.stdout)
-        # handler = StreamHandler()  # different for Jupyter notebooks? TBD
 
     # Tweak logging format
     # Get _root_ logger so we can see other modules.
