@@ -11,6 +11,33 @@ from pathlib import Path
 import requests
 
 
+def _download_kernel(url: str, dest: Path, timeout: float = 300.0) -> None:
+    """
+    Stream a kernel file from `url` to `dest`, atomically.
+
+    The download is written to a temporary sibling file first and moved into
+    place only after it completes, so an interrupted download can never leave
+    a corrupt (but apparently present) cache entry behind.
+
+    Args:
+        url (str): Remote URL of the kernel file.
+        dest (Path): Local path at which the kernel should be cached.
+        timeout (float, optional): Request timeout in seconds.
+            Defaults to 300.
+    """
+    tmp_path = dest.with_name(dest.name + ".part")
+    try:
+        with requests.get(url, stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            with open(tmp_path, "wb") as fp:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    fp.write(chunk)
+        tmp_path.replace(dest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def spice_kernel_mgr() -> tuple[Path, Path, Path]:
     """
     Download NAIF/SPICE kernel files required to calculate relative Earth/Sun geometry,
@@ -21,47 +48,35 @@ def spice_kernel_mgr() -> tuple[Path, Path, Path]:
     """
     logger = logging.getLogger(__name__)
 
-    # cache_dir = Path.home() / ".ezieview"
     cache_dir = Path(__file__).parent.parent / "binary-assets"
 
-    spk_cache_dir = cache_dir / "spk"
-    lsk_cache_dir = cache_dir / "lsk"
-    pck_cache_dir = cache_dir / "pck"
-
-    spk_cache_dir.mkdir(exist_ok=True)
-    lsk_cache_dir.mkdir(exist_ok=True)
-    pck_cache_dir.mkdir(exist_ok=True)
-
-    spk_path = spk_cache_dir / "de432s.bsp"
-    lsk_path = lsk_cache_dir / "naif0012.tls"
-    pck_path = pck_cache_dir / "pck00011.tpc"
-
-    spk_url = (
-        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de432s.bsp"
+    # (subdirectory, file name, remote URL)
+    kernels = (
+        (
+            "spk",
+            "de432s.bsp",
+            "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de432s.bsp",
+        ),
+        (
+            "lsk",
+            "naif0012.tls",
+            "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+        ),
+        (
+            "pck",
+            "pck00011.tpc",
+            "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc",
+        ),
     )
-    lsk_url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"
-    pck_url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc"
 
-    if not spk_path.exists():
-        logger.info("Downloading and caching SPK file...")
-        response = requests.get(spk_url)
-        response.raise_for_status()
-        spk_path.write_bytes(response.content)
+    paths = []
+    for subdir, name, url in kernels:
+        kernel_path = cache_dir / subdir / name
+        kernel_path.parent.mkdir(parents=True, exist_ok=True)
+        if not kernel_path.exists():
+            logger.info(f"Downloading and caching {subdir.upper()} file...")
+            _download_kernel(url, kernel_path)
+        logger.info(f"Using {subdir.upper()} file {kernel_path.as_posix()}")
+        paths.append(kernel_path)
 
-    if not lsk_path.exists():
-        logger.info("Downloading and caching LSK file...")
-        response = requests.get(lsk_url)
-        response.raise_for_status()
-        lsk_path.write_bytes(response.content)
-
-    if not pck_path.exists():
-        logger.info("Downloading and caching PCK file...")
-        response = requests.get(pck_url)
-        response.raise_for_status()
-        pck_path.write_bytes(response.content)
-
-    logger.info(f"Using SPK file {spk_path.as_posix()}")
-    logger.info(f"Using LSK file {lsk_path.as_posix()}")
-    logger.info(f"Using PCK file {pck_path.as_posix()}")
-
-    return spk_path, lsk_path, pck_path
+    return paths[0], paths[1], paths[2]
