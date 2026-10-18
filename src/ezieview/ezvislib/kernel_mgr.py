@@ -15,9 +15,9 @@ def _download_kernel(url: str, dest: Path, timeout: float = 300.0) -> None:
     """
     Stream a kernel file from `url` to `dest`, atomically.
 
-    The download is written to a temporary sibling file first and moved into
-    place only after it completes, so an interrupted download can never leave
-    a corrupt (but apparently present) cache entry behind.
+    The download is written to a temporary sibling file first and moved into place only
+    after it completes, so an interrupted download can never leave a corrupt (but
+    apparently present) cache entry behind.
 
     Args:
         url (str): Remote URL of the kernel file.
@@ -30,8 +30,7 @@ def _download_kernel(url: str, dest: Path, timeout: float = 300.0) -> None:
         with requests.get(url, stream=True, timeout=timeout) as response:
             response.raise_for_status()
             with open(tmp_path, "wb") as fp:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    fp.write(chunk)
+                fp.writelines(response.iter_content(chunk_size=1024 * 1024))
         tmp_path.replace(dest)
     except BaseException:
         tmp_path.unlink(missing_ok=True)

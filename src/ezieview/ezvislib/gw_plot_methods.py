@@ -213,10 +213,10 @@ def _l3_source_from_l2(l2_sorc: Path) -> Path:
     replacing the product-level token in the file name (not any "l2"
     substring in directory names).
     """
-    parts = l2_sorc.name.split("_")
-    if len(parts) >= 2 and parts[1].lower() == "l2":
-        parts[1] = "l3"
-        return l2_sorc.with_name("_".join(parts))
+    # parts = l2_sorc.name.split("_")
+    # if len(parts) >= 2 and parts[1].lower() == "l2":
+    #     parts[1] = "l3"
+    #     return l2_sorc.with_name("_".join(parts))
     # Fallback for nonstandard names: legacy full-path substitution.
     return Path(l2_sorc.as_posix().replace("l2", "l3"))
 
@@ -468,7 +468,7 @@ def _stack_mem_fields(nc_data: Dataset, field_tmpl: str) -> np.ndarray:
     Stack the MEM-numbered netCDF fields `field_tmpl{1..4}` into a single
     (NUM_MEM, n_obs) array.
     """
-    return np.vstack((nc_data[f"{field_tmpl}{mm}"] for mm in MEM_NUMBERS))
+    return np.vstack([nc_data[f"{field_tmpl}{mm}"] for mm in MEM_NUMBERS])
 
 
 def _update_range(
@@ -1023,15 +1023,18 @@ def plot_geolocation(
     time_utc = time_utc[use_obs]
     plot_type = "geolocation"
 
-    if _plot_needs_update(
-        source=source,
-        save_directory=save_directory,
-        obs_date=obs_date,
-        plot_type=plot_type,
-        spacecraft=sc_id,
-        tstmp=t_stamp,
-        overwrite=overwrite,
-    ) is None:
+    if (
+        _plot_needs_update(
+            source=source,
+            save_directory=save_directory,
+            obs_date=obs_date,
+            plot_type=plot_type,
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            overwrite=overwrite,
+        )
+        is None
+    ):
         return
 
     # Prepare subplots for grouped geolocation parameters
@@ -1177,16 +1180,19 @@ def plot_ancillary(
     sc_id = nc_data.getncattr("SpaceVehicle")
     plot_type = "ancillary"
 
-    if _plot_needs_update(
-        source=source,
-        save_directory=save_directory,
-        obs_date=obs_date,
-        plot_type=plot_type,
-        type_desc="ancillary (IGRF)",
-        spacecraft=sc_id,
-        tstmp=t_stamp,
-        overwrite=overwrite,
-    ) is None:
+    if (
+        _plot_needs_update(
+            source=source,
+            save_directory=save_directory,
+            obs_date=obs_date,
+            plot_type=plot_type,
+            type_desc="ancillary (IGRF)",
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            overwrite=overwrite,
+        )
+        is None
+    ):
         return
 
     # Prepare figure for plotting with sharex and sharey
@@ -1363,16 +1369,19 @@ def plot_calibration(
     for kk, t_kind in enumerate(t_kinds):
         t_kind_str = t_kind if not t_diff else f"{t_kind}_difference"
 
-        if _plot_needs_update(
-            source=source,
-            save_directory=save_directory,
-            obs_date=obs_date,
-            plot_type=f"{ckind}-{t_kind_str}",
-            type_desc=f"calibrated scene temperature ({t_kind})",
-            spacecraft=sc_id,
-            tstmp=t_stamp,
-            overwrite=overwrite,
-        ) is None:
+        if (
+            _plot_needs_update(
+                source=source,
+                save_directory=save_directory,
+                obs_date=obs_date,
+                plot_type=f"{ckind}-{t_kind_str}",
+                type_desc=f"calibrated scene temperature ({t_kind})",
+                spacecraft=sc_id,
+                tstmp=t_stamp,
+                overwrite=overwrite,
+            )
+            is None
+        ):
             continue
 
         fig, axs = plt.subplots(
@@ -1486,8 +1495,6 @@ def plot_calibration(
         )
 
 
-
-
 def plot_retrieved_bd_only(
     nc_data: Dataset,
     source: Path,
@@ -1575,16 +1582,19 @@ def plot_retrieved_bd_only(
         plot_type = f"retrieved_{mode.lower()}_b_fields_dBs"
 
     logger.debug(f"spacecraft ID is {sc_id}")
-    if _plot_needs_update(
-        source=source,
-        save_directory=save_directory,
-        obs_date=obs_date,
-        plot_type=plot_type,
-        type_desc="retrieved B_d",
-        spacecraft=sc_id,
-        tstmp=t_stamp,
-        overwrite=overwrite,
-    ) is None:
+    if (
+        _plot_needs_update(
+            source=source,
+            save_directory=save_directory,
+            obs_date=obs_date,
+            plot_type=plot_type,
+            type_desc="retrieved B_d",
+            spacecraft=sc_id,
+            tstmp=t_stamp,
+            overwrite=overwrite,
+        )
+        is None
+    ):
         return
 
     rtrvgrp = nc_data.groups["RetrievedParameters"]
@@ -1646,9 +1656,9 @@ def plot_retrieved_bd_only(
     for row in range(nrows):
         axs[row, 1].set_visible(False)
 
-    # We'll save the total variable range for each field component across
-    # all MEMs here, adjusting plot limits afterwards when we know what the
-    # correct range is for the whole ensemble.
+    # We'll save the total variable range for each field component across all MEMs here,
+    # adjusting plot limits afterwards when we know what the correct range is for the
+    # whole ensemble.
     b_rng = np.full((2), fill_value=np.nan)  # 4 B x [min,max]
 
     col = 0
@@ -1743,9 +1753,7 @@ def plot_retrieved_bd_only(
         logger.debug(f"{b_rng[0]} : {b_rng[1]}")
         # FIXME - kludge to use old L2 file - comment out line below
         try:
-            mem_axs.set_ylim(
-                (b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng)
-            )
+            mem_axs.set_ylim((b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng))
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
@@ -1837,6 +1845,7 @@ def plot_retrieved_bd_only(
             sun_mlon=sun_mlon[len(sun_mlon) // 2],
             alt4mag=REFERENCE_ALTITUDE_KM,
             south_inverted=(south_inverted and (hemisphere == SOUTH)),
+            color="xkcd:black" if not dark_mode else DARK_MODE_GRID_COLOR,
         )
         map_sc_mem_footprints_magnetic(
             map_axs=map_axs,
@@ -1845,7 +1854,7 @@ def plot_retrieved_bd_only(
             obs_lat=mag_lat[:, :].T,
             obs_lon=MLT_sign * mag_ltm[:, :].T * 15,  # Convert hours to degrees
             at_time=midpoint,
-            dark_mode=False,
+            dark_mode=dark_mode,
             zorder=4,
             small_text=False,
             plain=False,
@@ -1863,7 +1872,7 @@ def plot_retrieved_bd_only(
             obs_lat=obs_lat[:, use_obs].T,
             obs_lon=obs_lon[:, use_obs].T,
             at_time=midpoint,
-            dark_mode=False,
+            dark_mode=dark_mode,
             terminator=True,
             zorder=4,
             small_text=False,
@@ -1887,6 +1896,7 @@ def plot_retrieved_bd_only(
         nc_data=nc_data,
         source=source,
         title=fig_title,
+        dark_mode=dark_mode,
     )
     plt.subplots_adjust(
         left=0.06,
@@ -2309,10 +2319,6 @@ def map_sc_mem_footprints_magnetic(
         )
 
 
-
-
-
-
 def l3_map(
     l3_map_axs: GeoAxes,
     l3_data: L3PassData,
@@ -2353,6 +2359,9 @@ def l3_map(
         None
     """
     # TODO: Test this on EEJ passes. It's probably missing something.
+
+    # Instantiate figure and axes for plotting - tweak some rcparams as needed
+    _apply_dark_mode(dark_mode)
 
     # Unpack the pass arrays for use throughout this method.
     time_utc = l3_data.time_utc
@@ -2617,7 +2626,7 @@ def l3_map(
             vmin=vmin,
             vmax=vmax,
             marker="o",
-            edgecolors="xkcd:black",
+            edgecolors="xkcd:black" if not dark_mode else DARK_MODE_GRID_COLOR,
             linewidths=0.1,
             transform=DATA_TRANSFORM,
         )
@@ -2627,7 +2636,7 @@ def l3_map(
             y=lats[valid],
             s=b_mrk_sz / 4,
             c="none",
-            edgecolors="xkcd:black",
+            edgecolors="xkcd:black" if not dark_mode else DARK_MODE_GRID_COLOR,
             linewidths=0.5,
             marker=".",
             transform=DATA_TRANSFORM,
@@ -2686,8 +2695,8 @@ def plot_b_1D_maps_with_time(
     Returns:
         None
     """
-
     start = time.perf_counter()
+    _apply_dark_mode(dark_mode)
     prsd = parse_ezie_product_name(source=source)
     plot_type: str = "l3-l2"
     obs_date = datetime.datetime.strptime(prsd.date, EZIE_DATE_FORMAT).replace(
@@ -2732,8 +2741,10 @@ def plot_b_1D_maps_with_time(
         logger.warning(f"L3 file appears to contain EEJ pass, skipping: {source.name}")
         return
 
-    if np.all(l3_data.Jn == 0.0) and np.all(l3_data.Je == 0.0) and np.all(
-        l3_data.obs_B == 0.0
+    if (
+        np.all(l3_data.Jn == 0.0)
+        and np.all(l3_data.Je == 0.0)
+        and np.all(l3_data.obs_B == 0.0)
     ):
         logger.warning(
             f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
@@ -2798,20 +2809,22 @@ def plot_b_1D_maps_with_time(
         title=fig_title,
         git_branch=git_branch,
         git_commit=git_commit,
+        dark_mode=dark_mode,
         size="x-small",
     )
     plt.tight_layout()  # pad=0)
     plt.subplots_adjust(top=0.860, bottom=0.060)  # Modify tight_layout results slightly
 
     if hemisphere is not None:
+        qvclr = "orange" if dark_mode else "black"
         subtitle = (
-            "Currents (black arrows) are plotted in Geodetic/WGS84 coordinates (solid "
-            "grid).\nLabels indicate Local Time (LT). Magnetic latitude (dashed grid) "
-            "is also shown."
+            f"Currents ({qvclr} arrows) are plotted in Geodetic/WGS84 coordinates ("
+            "solid grid).\nLabels indicate Local Time (LT). Magnetic latitude (dashed "
+            "grid) is also shown."
         )
     else:
-        subtitle = """
-           Currents (black arrows) are plotted in Geodetic/WGS84 coordinates (solid
+        subtitle = f"""
+           Currents ({qvclr} arrows) are plotted in Geodetic/WGS84 coordinates (solid
            grid). Magnetic latitude (dashed grid) and drift equator (thick solid line)
            are also shown.
            """
@@ -2824,7 +2837,6 @@ def plot_b_1D_maps_with_time(
         va="bottom",
         fontsize="small",
         fontweight="bold",
-        # transform=map_axs.transAxes,
     )
 
     save_close_figure(
@@ -2847,7 +2859,6 @@ def plot_retrieved_B_and_J(
     nc2_sorc: Path,
     save_directory: Path,
     version: str | None = None,
-    # mode: str = "Uncorrected",
     figure_dpi: int = DFLT_RES,
     dark_mode: bool = False,
     south_inverted: bool = False,
@@ -3038,8 +3049,10 @@ def plot_retrieved_B_and_J(
     if l3_data.algorithm is not None:
         algorithm = l3_data.algorithm
 
-    if np.all(l3_data.Jn == 0.0) and np.all(l3_data.Je == 0.0) and np.all(
-        l3_data.obs_B == 0.0
+    if (
+        np.all(l3_data.Jn == 0.0)
+        and np.all(l3_data.Je == 0.0)
+        and np.all(l3_data.obs_B == 0.0)
     ):
         logger.warning(
             f"L3 file Je, Jn, and observed B values are all zero, skipping: {ftgt.stem}"
@@ -3102,6 +3115,8 @@ def plot_retrieved_B_and_J(
         show_b_value=show_b_value,
     )
 
+    fpclr = "gray" if dark_mode else "black"
+    qvclr = "orange" if dark_mode else "black"
     if algorithm == "down":
         mag_label = "dB$_\\mathbf{{D}}$"
     else:
@@ -3112,21 +3127,21 @@ def plot_retrieved_B_and_J(
                 f"circles, colored according to the observed value of {mag_label}"
             )
         else:
-            mem_fp_desc = "black dots"
+            mem_fp_desc = f"{fpclr} dots"
 
-        subtitle1 = f"""Currents (black arrows) are plotted above in Geodetic/WGS84
+        subtitle1 = f"""Currents ({qvclr} arrows) are plotted above in Geodetic/WGS84
         coordinates (solid grid). Labels indicate Local Time (LT). Magnetic latitude
         (dashed grid) is also shown. MEM footprint locations, shown above as
         {mem_fp_desc}, are also plotted below in Apex Geomagnetic coordinates."""
 
     else:
-        subtitle1 = """Currents (black arrows) are plotted in Geodetic/WGS84
+        subtitle1 = f"""Currents ({qvclr} arrows) are plotted in Geodetic/WGS84
         coordinates (solid grid). Magnetic latitude (dashed grid) and drift equator
         (thick solid line) are also shown. MEM footprints are plotted below in Apex
         Geomagnetic coordinates."""
 
     subtitle2 = f"""The MEM d|B| data plotted at left is sampled at a 2 second cadence.
-    The black lines are the running average of {AVERAGING_WINDOW} samples. The magenta
+    The {fpclr} lines are the running average of {AVERAGING_WINDOW} samples. The magenta
     lines show the modeled dB$_{{down}}$ values sampled along each MEM
     footprint."""
 
@@ -3219,7 +3234,7 @@ def plot_retrieved_B_and_J(
         mem_axs.plot(
             time_utc[use_obs],
             [model_B[x, y] for x, y in sample_pts],
-            color="magenta" if not dark_mode else DARK_MODE_TEXT_COLOR,
+            color="magenta",
             linestyle="solid",
             lw=1.0,
             zorder=2,
@@ -3276,9 +3291,7 @@ def plot_retrieved_B_and_J(
         logger.debug(f"{b_rng[0]} : {b_rng[1]}")
         # FIXME - kludge to use old L2 file - comment out line below
         try:
-            mem_axs.set_ylim(
-                (b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng)
-            )
+            mem_axs.set_ylim((b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng))
         except Exception as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")

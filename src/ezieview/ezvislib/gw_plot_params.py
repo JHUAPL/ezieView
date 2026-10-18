@@ -55,7 +55,8 @@ DFLT_RES = 100  # DPI
 TERMINATOR_ALPHA = 0.25
 TERMINATOR_COLOR = "#000044"
 DARK_MODE_FILL_COLOR = "#202020"  # background INSIDE axes
-DARK_MODE_FACE_COLOR = "#0F1116"  # background OUTSIDE axes
+# DARK_MODE_FACE_COLOR = "#0F1116"  # background OUTSIDE axes
+DARK_MODE_FACE_COLOR = "#282828"  # background OUTSIDE axes
 DARK_MODE_GRID_COLOR = "#606060"  # geodetic and magnetic grid color in dark mode
 DARK_MODE_TEXT_COLOR = "#A0A0A0"  # geodetic and magnetic text/label color in dark mode
 

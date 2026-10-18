@@ -169,7 +169,6 @@ def split_on_science_segments(
     return _segments_from_flags(obs_flg, obs_max)
 
 
-
 def jpl_safe_datetime(
     datestr: str,
     timestr: str,
@@ -348,10 +347,7 @@ def _latest_revisions(
         file_dttm = dttm_fn(prsd)
         logger.debug(f"Examining file {each_file.name} with datetime {file_dttm}")
         # Will "backup" subdirectory regularly appear in pipeline data directory? TBD
-        if (
-            (start_date <= file_dttm <= stop_date)
-            and (each_file.parent != "backup")
-        ):
+        if (start_date <= file_dttm <= stop_date) and (each_file.parent != "backup"):
             file_key = key_fn(prsd)
             revision = f"v{prsd.vrsn}_r{prsd.rvsn}"
             logger.debug(f"{file_key} {revision}")
@@ -919,7 +915,7 @@ def overlay_ezie_logo(
         Path(__file__).parent.parent / "binary-assets" / img_name
     )
     img_aspect_ratio = ezie_logo_img.shape[1] / ezie_logo_img.shape[0]
-    hi = 0.07
+    hi = 0.065
     wi = hi * img_aspect_ratio * fig.get_figheight() / fig.get_figwidth()
     axs_pos = fig.add_axes([0.001, 1 - hi - 0.002, wi, hi])
     axs_pos.imshow(ezie_logo_img, aspect="auto")
@@ -1156,8 +1152,6 @@ def magnetic_parallel(
         return geo_lat[srt_ndx], geo_lon[srt_ndx]
 
 
-
-
 def plot_geomagnetic_references(
     ax: plt.Axes,
     at_time: float,
@@ -1230,7 +1224,6 @@ def plot_geomagnetic_references(
             transform=ccrs.PlateCarree(),
         )
     return mag_lat_artist
-
 
 
 def hash_ezie_data_product(source: str | Path):
@@ -1327,7 +1320,9 @@ def _build_figure_path(
         od_path = od_path / str(spacecraft)[-1].lower()
     od_path.mkdir(parents=True, exist_ok=True)
     orbit_str = f"{int(orbit):06d}_" if orbit is not None else ""
-    spacecraft_str = f"sv{str(spacecraft)[-1].lower()}_" if spacecraft is not None else ""
+    spacecraft_str = (
+        f"sv{str(spacecraft)[-1].lower()}_" if spacecraft is not None else ""
+    )
     version_str = f"{version}_" if version is not None else ""
     if source is not None:
         prsd = parse_ezie_product_name(source)
@@ -1336,8 +1331,7 @@ def _build_figure_path(
         else:
             tstmp_str = f"{int(tstmp):06d}" if tstmp is not None else ""
         return od_path / (
-            f"ezie_{prsd.prod}_{prsd.date}_{tstmp_str}_sv{prsd.spcv}_"
-            f"{plot_type}.png"
+            f"ezie_{prsd.prod}_{prsd.date}_{tstmp_str}_sv{prsd.spcv}_{plot_type}.png"
         )
     tstmp_str = f"{int(tstmp):06d}_" if tstmp is not None else orbit_str
     return od_path / (
@@ -1422,8 +1416,8 @@ def save_close_figure(
 
     if not old_format and fig_path.exists():
         # Open image and access metadata (PNG text chunks)
-        img = Image.open(fig_path)
         try:
+            img = Image.open(fig_path)
             metadata = img.text
             logger.debug(f"{type(metadata)}")
             logger.debug(f"{metadata!s}")

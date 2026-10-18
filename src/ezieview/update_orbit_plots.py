@@ -363,7 +363,6 @@ def main(
 
     # Configure logging, log all supplied arguments using method's default log output
     # folder and log level (INFO)
-    logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
     logger.info("======= NEW RUN =======")
     context = click.get_current_context()
     for nam, val in context.params.items():
@@ -454,4 +453,5 @@ def main(
 
 
 if __name__ == "__main__":
+    logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
     main(max_content_width=120)
