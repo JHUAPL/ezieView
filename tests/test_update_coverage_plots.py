@@ -117,7 +117,7 @@ def test_coverage_histograms_mlt_wraparound():
     bin_edg = ucp._coverage_bin_edges(MLT, NORTH)
     orb_edg = ucp._orbit_edges(orbit)
 
-    cvrg, cmax, sampled = ucp._coverage_histograms(
+    cvrg, _cmax, sampled = ucp._coverage_histograms(
         cvrg_type=MLT,
         regn=NORTH,
         sc_id=sc_id,
@@ -152,7 +152,9 @@ def test_stack_mem_arrays():
         fdd[f"obs_magLT{m}"] = np.full(5, 1.0 * m)
         fdd[f"obs_solar_zen{m}"] = np.full(5, 10.0 * m)
 
-    mem_lat, mem_lon, mem_mlat, mem_mlt, mem_sza, mem_mode = ucp._stack_mem_arrays(fdd)
+    mem_lat, _mem_lon, _mem_mlat, _mem_mlt, _mem_sza, mem_mode = ucp._stack_mem_arrays(
+        fdd
+    )
     assert mem_lat.shape == (NUM_MEM, 5)
     np.testing.assert_array_equal(mem_lat[0], [1.0, 1.0, 1.0, 1.0, 1.0])
     # NaN magnetic latitude means sky-look
