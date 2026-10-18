@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Plotting routines for the EZIE Level 1, 2, and 3 data products"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = [
   "apexpy",
   "cartopy",
