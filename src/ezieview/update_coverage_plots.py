@@ -108,7 +108,7 @@ MAP_MARKER = "o"
 SC_MS = 2
 MEM_MS = 2
 END_MS = 4
-END_MEW = 0.25
+END_MEW = 0.5
 LEGEND_MARKER_SCALE = 2  # Magnify marker size for legend display
 
 # ===== MEM coverage histogram parameters ==============================================
@@ -378,8 +378,7 @@ def _render_coverage_figure(
 
     # Tweak position and add any figure-level annotation
     fig.suptitle(
-        f"MEM {cvrg_type} Coverage, All Orbits: "
-        f"{obs_date.strftime('%Y-%m-%d (%j)')}",
+        f"MEM {cvrg_type} Coverage, All Orbits: {obs_date.strftime('%Y-%m-%d (%j)')}",
         weight="bold",
         fontsize="x-large",
     )
@@ -562,10 +561,28 @@ def _scatter(
 
 def _orbit_endpoints(map_axs, x, y, end_mec: str) -> None:
     """Mark the first and last in-region samples of a spacecraft track."""
-    _scatter(map_axs, x[0], y[0], label="Start", zorder=5, ms=END_MS,
-             mfc=BGN_COLOR, mec=end_mec, mew=END_MEW)
-    _scatter(map_axs, x[-1], y[-1], label="End", zorder=5, ms=END_MS,
-             mfc=END_COLOR, mec=end_mec, mew=END_MEW)
+    _scatter(
+        map_axs,
+        x[0],
+        y[0],
+        label="Start",
+        zorder=5,
+        ms=END_MS,
+        mfc=BGN_COLOR,
+        mec=end_mec,
+        mew=END_MEW,
+    )
+    _scatter(
+        map_axs,
+        x[-1],
+        y[-1],
+        label="End",
+        zorder=5,
+        ms=END_MS,
+        mfc=END_COLOR,
+        mec=end_mec,
+        mew=END_MEW,
+    )
 
 
 def _dedup_legend(map_axs, bbox_to_anchor: tuple, loc: str) -> None:
@@ -647,8 +664,14 @@ def _plot_sv_orbits(
                 )
 
             if mem_obs:  # plot MEM footprint[s]
-                _scatter(map_axs, mlt_sign * xcrd[in_rgn], ycrd[in_rgn],
-                         color=EZIE_COLOR, label=EZIE_LABEL, zorder=2)
+                _scatter(
+                    map_axs,
+                    mlt_sign * xcrd[in_rgn],
+                    ycrd[in_rgn],
+                    color=EZIE_COLOR,
+                    label=EZIE_LABEL,
+                    zorder=2,
+                )
                 for mem_ndx, mem_num in enumerate(MEM_NUMBERS):
                     dce = mem_mode[mem_ndx] & in_rgn
                     if np.any(dce):
@@ -666,11 +689,23 @@ def _plot_sv_orbits(
                 sv_dce = in_rgn & sci_mode
                 sv_slk = in_rgn & ~sci_mode
                 if np.any(sv_dce):
-                    _scatter(map_axs, mlt_sign * xcrd[sv_dce], ycrd[sv_dce],
-                             color=SCIENCE_COLOR, label=SCIENCE_LABEL, zorder=3)
+                    _scatter(
+                        map_axs,
+                        mlt_sign * xcrd[sv_dce],
+                        ycrd[sv_dce],
+                        color=SCIENCE_COLOR,
+                        label=SCIENCE_LABEL,
+                        zorder=3,
+                    )
                 if np.any(sv_slk):
-                    _scatter(map_axs, mlt_sign * xcrd[sv_slk], ycrd[sv_slk],
-                             color=SPCLOOK_COLOR, label=SPCLOOK_LABEL, zorder=3)
+                    _scatter(
+                        map_axs,
+                        mlt_sign * xcrd[sv_slk],
+                        ycrd[sv_slk],
+                        color=SPCLOOK_COLOR,
+                        label=SPCLOOK_LABEL,
+                        zorder=3,
+                    )
 
             _orbit_endpoints(map_axs, mlt_sign * xcrd[in_rgn], ycrd[in_rgn], end_mec)
 
@@ -710,8 +745,9 @@ def _render_polar_maps(
     for ptype in POLAR_PLOT_TYPES:
         for regn in pol_regn:
             plot_type = f"{regn.lower()}-{ptype}"
-            if _skip_existing(obs_date, plot_type, output_dir, dark_mode, figure_dpi,
-                              overwrite):
+            if _skip_existing(
+                obs_date, plot_type, output_dir, dark_mode, figure_dpi, overwrite
+            ):
                 continue
             logger.info(f"Generating MEM coverage plot of type {plot_type}")
 
@@ -807,8 +843,9 @@ def _render_mollweide_maps(
     end_mec = DARK_MODE_GRID_COLOR if dark_mode else "black"
     for ptype in MOLLWEIDE_PLOT_TYPES:
         plot_type = f"equatorial-{ptype}"
-        if _skip_existing(obs_date, plot_type, output_dir, dark_mode, figure_dpi,
-                          overwrite):
+        if _skip_existing(
+            obs_date, plot_type, output_dir, dark_mode, figure_dpi, overwrite
+        ):
             continue
         logger.info(f"Generating MEM coverage plot of type {plot_type}")
 
@@ -1031,7 +1068,9 @@ def _regions_with_observations(fdd: dict, uniq_orbs: np.ndarray) -> list:
                     sv_regns[rndx, sndx] = True
 
     for rndx, regn in enumerate(REGIONS):
-        logger.info(f"{regn:10s} {bool(sv_regns[rndx].any()):5s} {sv_regns[rndx, :]!r}")
+        logger.info(
+            f"{regn:10s} {bool(sv_regns[rndx].any())!s:5s} {sv_regns[rndx, :]!r}"
+        )
     return list(np.array(REGIONS)[sv_regns.any(axis=1)])
 
 
@@ -1173,8 +1212,8 @@ def main(
         )  # Full Day Dictionary
 
         # Stack MEM coordinate arrays so we can loop through them in plotting routines
-        (mem_lat, mem_lon, mem_mlat, mem_mlt, mem_sza, mem_mode) = (
-            _stack_mem_arrays(fdd)
+        (mem_lat, mem_lon, mem_mlat, mem_mlt, mem_sza, mem_mode) = _stack_mem_arrays(
+            fdd
         )
 
         # Determine earth/sky look status at each time step for each MEM. The SV
