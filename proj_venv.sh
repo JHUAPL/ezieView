@@ -9,7 +9,7 @@ uv self update
 
 # Create venv if not present
 echo "Checking venv status..."
-[ -d .venv ] || uv venv -p 3.12
+[ -d .venv ] || uv venv -p 3.14 --python-preference only-managed
 # shellcheck disable=SC1091
 . ./.venv/bin/activate
 

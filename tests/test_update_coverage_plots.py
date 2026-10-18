@@ -152,9 +152,7 @@ def test_stack_mem_arrays():
         fdd[f"obs_magLT{m}"] = np.full(5, 1.0 * m)
         fdd[f"obs_solar_zen{m}"] = np.full(5, 10.0 * m)
 
-    mem_lat, mem_lon, mem_mlat, mem_mlt, mem_sza, mem_mode = (
-        ucp._stack_mem_arrays(fdd)
-    )
+    mem_lat, mem_lon, mem_mlat, mem_mlt, mem_sza, mem_mode = ucp._stack_mem_arrays(fdd)
     assert mem_lat.shape == (NUM_MEM, 5)
     np.testing.assert_array_equal(mem_lat[0], [1.0, 1.0, 1.0, 1.0, 1.0])
     # NaN magnetic latitude means sky-look
@@ -236,11 +234,16 @@ def test_main_smoke(tmp_path, monkeypatch):
     result = runner.invoke(
         ucp.main,
         [
-            "-d0", "2025-06-20",
-            "-d1", "2025-06-20",
-            "-fd", str(tmp_path),
-            "-fp", "ezie_l1*.nc4",
-            "-pd", str(tmp_path / "plots"),
+            "-d0",
+            "2025-06-20",
+            "-d1",
+            "2025-06-20",
+            "-fd",
+            str(tmp_path),
+            "-fp",
+            "ezie_l1*.nc4",
+            "-pd",
+            str(tmp_path / "plots"),
         ],
     )
     assert result.exit_code == 0, result.output

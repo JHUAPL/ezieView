@@ -334,7 +334,8 @@ def _render_coverage_figure(
 
     # "plasma" gives an abrupt 0 to >0 transition; under-range (empty) bins in white
     cmap = plt.get_cmap("plasma", int(cmax))
-    cmap.set_under("white")
+    # cmap.set_under("white")  # deprecated
+    cmap.with_extremes(under="white")
 
     for sndx, spcrft in enumerate(SPACECRAFT):
         for mem_ndx in range(NUM_MEM):
