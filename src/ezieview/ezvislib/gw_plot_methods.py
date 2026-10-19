@@ -101,6 +101,9 @@ MEM_BEAM_DIAGRAM_PATH = (
     Path(__file__).parent.parent / "binary-assets" / "SV_NoSVFrame.png"
     # Path(__file__).parent.parent / "binary-assets" / "mem-beam-diagram.png"
 )
+# Color bar limits (+/-) for displayed dBs (nT). May need adjustment to avoid
+# overemphasizing noise in current L3 inversion. Was 1000 nT.
+CB_B_AMP = 750
 # endregion
 
 
@@ -2531,16 +2534,6 @@ def l3_map(
     qwid = 0.001  # scales the WIDTH of the quiver arrow(head?)s
     b_mrk_sz = 20  # Marker size used for observed and modeled B scatter plots
 
-    # Shared B magnitude color scales, choose one.
-    # Relative:
-    # vmin = min(np.nanmin(obs_B), np.nanmin(model_B))
-    # vmax = max(np.nanmin(obs_B), np.nanmin(model_B))
-    # vmin = -1 * min(abs(vmin), abs(vmax)) # make it symmetric about zero
-    # vmax = -1 * vmin
-    # Fixed:
-    vmin = -1200
-    vmax = +1200
-
     if dark_mode:
         color_min = "#4203ff"
         color_center = DARK_MODE_FILL_COLOR
@@ -2554,20 +2547,6 @@ def l3_map(
 
     # Model B
     valid = model_B != NCDF_MISSING
-
-    vmin = -1000
-    vmax = +1000
-
-    # sc = l3_map_axs.scatter(
-    #     MLT_sign * lon_mesh[valid].flatten(),
-    #     lat_mesh[valid].flatten(),
-    #     c=b_sign_mod * model_B[valid].flatten(),
-    #     cmap=cmap,
-    #     vmin=vmin,
-    #     vmax=vmax,
-    #     s=b_mrk_sz,
-    #     transform=DATA_TRANSFORM,
-    # )
 
     def smooth_along_track(values, window=5):
         kernel = np.ones(window, dtype=float)
@@ -2595,8 +2574,8 @@ def l3_map(
         lat_mesh,
         b_sign_mod * obs_bmag_smooth,
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        vmin=-CB_B_AMP,
+        vmax=+CB_B_AMP,
         shading="auto",
         transform=DATA_TRANSFORM,
     )
@@ -2623,8 +2602,8 @@ def l3_map(
             s=b_mrk_sz / 2,
             c=obs_B[valid],
             cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
+            vmin=-CB_B_AMP,
+            vmax=+CB_B_AMP,
             marker="o",
             edgecolors="xkcd:black" if not dark_mode else DARK_MODE_GRID_COLOR,
             linewidths=0.1,
