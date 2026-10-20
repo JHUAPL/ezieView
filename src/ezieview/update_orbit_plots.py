@@ -56,9 +56,8 @@ def file_handler(
         logger.error(f"Corrupted file name? {each_file}")
         return
 
-    version = f"{prsd.vrsn}_{prsd.rvsn}"
-
-    # Only one process, they can share the loaded spice kernels
+    # NOTE: Kernels are furnished per file, so each worker process furnishes its own
+    # copy when multiprocessing is enabled.
     spk, lsk, pck = spice_kernel_mgr()
     spiceypy.furnsh([spk.as_posix(), lsk.as_posix(), pck.as_posix()])
 
@@ -68,19 +67,16 @@ def file_handler(
                 nobs = nc_data.dimensions["ObsRate"].size
             except Exception as exc:
                 logger.error(
-                    f"Exception: {exc} obtaining ObsRate in file "
-                    f"{Path(each_file).as_posix()}"
+                    f"Exception: {exc} obtaining ObsRate in file {each_file.as_posix()}"
                 )
                 return
             if nobs < 10:
-                logger.error(
-                    f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
-                )
+                logger.error(f"Problem file (ObsRate={nobs}): {each_file.as_posix()}")
                 return
 
             product = nc_data.getncattr("product")
             if product == "L1":
-                logger.info(f"Processing {product} file {Path(each_file).name}")
+                logger.info(f"Processing {product} file {each_file.name}")
                 # Calibration plots requires L1 product file - not populated in L2
                 # product ATM.
 
@@ -93,37 +89,27 @@ def file_handler(
                     # NOTE: Passing tdiff=True will plot the temperature differences
                     # from one time step to the next, rather than the current value
                     # at that timestep (project scientist request).
-
+                    common = {
+                        "source": each_file,
+                        "indices": index_pair,
+                        "save_directory": out_dir_path,
+                        "overwrite": overwrite,
+                        "figure_dpi": figure_dpi,
+                        "dark_mode": dark_mode,
+                    }
                     gw_plot_methods.plot_calibration(
                         nc_data=nc_data,
-                        source=each_file,
-                        indices=index_pair,
-                        save_directory=out_dir_path,
                         t_diff=False,
-                        overwrite=overwrite,
-                        dark_mode=dark_mode,
-                        figure_dpi=figure_dpi,
+                        **common,
                     )
-
                     gw_plot_methods.plot_geolocation(
-                        nc_data=nc_data,
-                        source=each_file,
-                        indices=index_pair,
-                        save_directory=out_dir_path,
-                        overwrite=overwrite,
-                        figure_dpi=figure_dpi,
-                        dark_mode=dark_mode,
-                    )  # Requires L0A or higher level product file
-
+                        nc_data=nc_data,  # Requires L0A or higher level product file
+                        **common,
+                    )
                     gw_plot_methods.plot_ancillary(
-                        nc_data=nc_data,
-                        source=each_file,
-                        indices=index_pair,
-                        save_directory=out_dir_path,
-                        overwrite=overwrite,
-                        figure_dpi=figure_dpi,
-                        dark_mode=dark_mode,
-                    )  # Requires L1 or higher level product files
+                        nc_data=nc_data,  # Requires L1 or higher level product files
+                        **common,
+                    )
 
             else:
                 logger.error(f"{product} misidentified as L1-skipping")
@@ -132,25 +118,23 @@ def file_handler(
         # NOTE: L2 files are already segmented into individual science passes based
         # on the algorithm in split_on_science_segments(). No further distinction
         # needs to be made.
+        version = f"{prsd.vrsn}_{prsd.rvsn}"
 
         try:
-            with Dataset(each_file, mode="r") as nc_data:
-                nobs = nc_data.dimensions["ObsRate"].size
-        except OSError:
-            logger.exception(
-                f"Unable to open file {Path(each_file).as_posix()}", stack_info=True
-            )
+            nc_data = Dataset(each_file, mode="r")
+        except OSError as exc:
+            logger.error(f"Unable to open file {each_file.as_posix()}: {exc}")
             return
 
-        with Dataset(each_file, mode="r") as nc_data:
+        with nc_data:
             nobs = nc_data.dimensions["ObsRate"].size
             if nobs < 10:
-                logger.error(
-                    f"Problem file (ObsRate={nobs}): {Path(each_file).as_posix()}"
-                )
+                logger.error(f"Problem file (ObsRate={nobs}): {each_file.as_posix()}")
                 return
-            if nc_data.getncattr("product") == "L2" and not merged_l2_l3:
-                logger.info(f"Processing L2 file {Path(each_file).name}")
+
+            product = nc_data.getncattr("product")
+            if product == "L2" and not merged_l2_l3:
+                logger.info(f"Processing L2 file {each_file.name}")
 
                 gw_plot_methods.plot_retrieved_bd_only(
                     nc_data=nc_data,
@@ -159,11 +143,11 @@ def file_handler(
                     version=version,
                     south_inverted=True,  # Use heliospheric community mapping style
                     overwrite=overwrite,
-                    figure_dpi=300,
+                    figure_dpi=figure_dpi,
                     dark_mode=dark_mode,
                 )  # Requires L2 or higher level products files
 
-            elif nc_data.getncattr("product") == "L2" and merged_l2_l3:
+            elif product == "L2" and merged_l2_l3:
                 gw_plot_methods.plot_retrieved_B_and_J(
                     nc2_data=nc_data,
                     nc2_sorc=each_file,
@@ -171,38 +155,29 @@ def file_handler(
                     version=version,
                     south_inverted=True,  # Use heliospheric community mapping style
                     overwrite=overwrite,
-                    figure_dpi=300,
+                    figure_dpi=figure_dpi,
                     dark_mode=dark_mode,
                 )  # Requires L2 or higher level products files
 
             else:
-                logger.error(
-                    f"{nc_data.getncattr('product')} misidentified as L2-skipping"
-                )
+                logger.error(f"{product} misidentified as L2-skipping")
 
     elif "l3" in each_file.stem.lower():
         # TODO Version 2 L3 files do not yet have any much common metadata/attributes.
         # Grab pipeline version info from corresponding L2 file if it is not yet
         # incorporated in the supplied product. REMOVE this once ALL product files have
         # been updated.
-        source_l2 = each_file.as_posix().replace("l3", "l2")
-        try:
-            with Dataset(each_file, mode="r") as l3_data:
-                git_branch = f"{l3_data['Configuration/git_branch'][:]}"
-                git_commit = f"{l3_data['Configuration/git_hash'][:]}"
-        except Exception as exc:
-            logger.warning("Unable to get commit & hash from source L3 file:")
-            logger.warning(f"==> {each_file}")
-            logger.warning(f"Exception was: {exc}")
-            with Dataset(source_l2, mode="r") as l2_data:
-                git_branch = f"{l2_data['Configuration/git_branch'][:]}"
-                git_commit = f"{l2_data['Configuration/git_hash'][:]}"
-        # TODO: Properly categorize exception types that may be encountered here
-        except ValueError:
-            logger.warning("Also unable to get commit & hash from matching L2 file:")
-            logger.warning(f"==> {source_l2}")
-            git_branch = None
-            git_commit = None
+        source_l2 = each_file.with_name(each_file.name.replace("l3", "l2", 1))
+        git_branch = None
+        git_commit = None
+        for src in (each_file, source_l2):
+            try:
+                with Dataset(src, mode="r") as data:
+                    git_branch = str(data["Configuration/git_branch"][:])
+                    git_commit = str(data["Configuration/git_hash"][:])
+                break
+            except Exception as exc:
+                logger.warning(f"Unable to get git branch/commit from {src}: {exc}")
 
         with Dataset(each_file, mode="r") as nc_data:
             try:
@@ -214,9 +189,7 @@ def file_handler(
                 )
                 return
             if nobs < 10:
-                logger.error(
-                    f"Problem file (time={nobs}): {Path(each_file).as_posix()}"
-                )
+                logger.error(f"Problem file (time={nobs}): {each_file.as_posix()}")
                 return
 
             gw_plot_methods.plot_b_1D_maps_with_time(
@@ -228,25 +201,15 @@ def file_handler(
                 git_commit=git_commit,  # Not yet in L3 product, borrowed from L2
                 overwrite=overwrite,
                 dark_mode=dark_mode,
-                figure_dpi=200,
+                figure_dpi=figure_dpi,
             )
-
-            # Only Version 3 L3 files currently have this global atrtibute. Hold off
-            # implementation.
-            # if nc_data.getncattr("product") == "L3":
-            #     logger.info(f"Processing L3 file {Path(each_file).name}")
-            # else:
-            #     logger.error(
-            #         f"{nc_data.getncattr('product')} misidentified as L3-skipping"
-            #     )
 
     spiceypy.kclear()
 
 
 # region cli
 # Define command line options using 'click' package decorators.
-@click.command(context_settings={"show_default": True})  #  , no_args_is_help=True)
-# @click.option("-h", "--help", is_flag=True, help="Display this help message")
+@click.command(context_settings={"show_default": True})
 @click.option(
     "-d0",
     "--start_date",
@@ -289,15 +252,13 @@ def file_handler(
 @click.option(
     "-merged",
     "--merged_l2_l3",
-    default=False,
-    type=bool,
+    is_flag=True,
     help="Generate a figure with both L2 and L3 results plotted",
 )
 @click.option(
     "-over",
     "--overwrite",
-    default=False,
-    type=bool,
+    is_flag=True,
     help="Overwrite existing files. If not set, any existing files will be skipped",
 )
 @click.option(
@@ -318,9 +279,7 @@ def file_handler(
 @click.option(
     "-mp",
     "--multiprocess",
-    # is_flag=True,
-    default=False,
-    type=bool,
+    is_flag=True,
     help="Use a multiprocessing worker pool to process individual orbits in parallel",
 )
 # endregion cli
@@ -353,16 +312,20 @@ def main(
         be skipped.
         dark_mode: Generate plots using 'dark mode' format.
         figure_dpi: Resolution (DPI) at which to generate the plots.
+        multiprocess: Use a multiprocessing worker pool to process individual
+            orbits in parallel.
 
     Returns:
         int: 0 on success, 1 if no files were found matching the date specifications.
     """
+    # Configure logging using method's default log output folder and log level (INFO)
+    logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
+
     t_bgn = datetime.datetime.now(UTC_TZ)
     start_date = start_date.replace(tzinfo=UTC_TZ)
     stop_date = stop_date.replace(tzinfo=UTC_TZ).replace(hour=23, minute=59, second=59)
 
-    # Configure logging, log all supplied arguments using method's default log output
-    # folder and log level (INFO)
+    # Log all supplied arguments
     logger.info("======= NEW RUN =======")
     context = click.get_current_context()
     for nam, val in context.params.items():
@@ -389,17 +352,15 @@ def main(
             f"Found {len(keep_files)} files matching specified pattern and date range"
         )
 
-    # Change file sorting from a purely lexicographical order (including the full path!)
-    # to a sort based on date and time primarily and SV only secondarily.
-    new_list = []
-    for ndx, each_file in enumerate(keep_files):
-        prsd = parse_ezie_product_name(each_file)
-        new_list.append((ndx, prsd.spcv, prsd.dttm))
-    srt_list = sorted(new_list, key=lambda f: (f[2], f[1]))
-
-    # Now select date order processing - ascending or descending.
-    # Oldest data first? srt_list[::+1]. Newest data first? srt_list[::-1].
-    keep_files = [keep_files[new_srt[0]] for new_srt in srt_list[::+1]]
+    # Re-sort from the lexicographical order (including the full path!) returned by
+    # filter_files_by_version to one based on date/time primarily and SV secondarily,
+    # processing oldest data first.
+    keep_files.sort(
+        key=lambda f: (
+            parse_ezie_product_name(f).dttm,
+            parse_ezie_product_name(f).spcv,
+        )
+    )
 
     # Create output directory for storage of plot files if it does not already exist
     out_dir_path = Path(plots_directory)
@@ -453,5 +414,4 @@ def main(
 
 
 if __name__ == "__main__":
-    logger = gw_logger.initialize_logging(log_to_file=True, rotating=True)
     main(max_content_width=120)
