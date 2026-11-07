@@ -252,14 +252,14 @@ def file_handler(
 @click.option(
     "-merged",
     "--merged_l2_l3",
-    is_flag=True,
+    type=bool,
     help="Generate a figure with both L2 and L3 results plotted",
 )
 @click.option(
     "-over",
     "--overwrite",
-    is_flag=True,
-    help="Overwrite existing files. If not set, any existing files will be skipped",
+    type=bool,
+    help="Overwrite existing files. If not set, any existing files will be skipped ",
 )
 @click.option(
     "-dm",
@@ -330,6 +330,9 @@ def main(
     context = click.get_current_context()
     for nam, val in context.params.items():
         logger.info(f"{nam:18s} : {val}")
+
+    git_branch, git_hash = gw_logger.get_git_version()
+    logger.info(f"git branch: {git_branch} commit hash: {git_hash}")
 
     # Create list of highest version/revision for a given spacecraft and date. For
     # products that require separation of full-day files into individual science passes,

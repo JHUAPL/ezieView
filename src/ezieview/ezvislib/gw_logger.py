@@ -8,15 +8,43 @@ formats.
 
 # region imports
 import datetime
+
+# endregion
 import logging
 import logging.handlers
+import os
 import platform
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-# endregion
+logger = logging.getLogger(__name__)
+
+
+def _git_or_env(git_args, env_var):
+    try:
+        cwdToUse = Path(__file__).parent  # this script should be in the repo
+        result = subprocess.run(
+            ["git", *git_args],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=cwdToUse,
+        )
+        value = result.stdout.strip()
+        if value:
+            return value
+    except Exception:
+        pass
+
+    return os.getenv(env_var, "unknown")
+
+
+def get_git_version():
+    git_branch = _git_or_env(["rev-parse", "--abbrev-ref", "HEAD"], "GIT_BRANCH")
+    git_hash = _git_or_env(["rev-parse", "--verify", "--short", "HEAD"], "GIT_HASH")
+    return git_branch, git_hash
 
 
 def _log_format(
@@ -33,12 +61,7 @@ def _log_format(
         return "%(message)s"
     if jupyter and not using_imports:
         # Skip filename and funcName fields for self-contained notebooks
-        return (
-            "%(asctime)s "
-            "%(levelname)8s "
-            "[%(lineno)4i] "
-            "%(message)s"
-        )
+        return "%(asctime)s %(levelname)8s [%(lineno)4i] %(message)s"
     if multiproc:
         # Thread and process identifiers are only useful for multi-threaded or
         # multi-process applications

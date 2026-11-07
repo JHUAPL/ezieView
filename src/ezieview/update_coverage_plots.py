@@ -82,7 +82,7 @@ from ezieview.ezvislib.gw_plot_utils import (
 mpl.use("Agg")
 
 # Root logger, configured by gw_logger.initialize_logging() inside main().
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 # ===== Daily map plot parameters ======================================================
 # Plot ID suffixes for the daily map figures
@@ -1178,6 +1178,9 @@ def main(
     context = click.get_current_context()
     for nam, val in context.params.items():
         logger.info(f"{nam:18s} : {val}")
+
+    git_branch, git_hash = gw_logger.get_git_version()
+    logger.info(f"git branch: {git_branch} commit hash: {git_hash}")
 
     # Create list of highest version/revision for a given spacecraft and date,
     # for the per-orbit L1 files
