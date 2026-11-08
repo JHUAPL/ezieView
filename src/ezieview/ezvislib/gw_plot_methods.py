@@ -1502,7 +1502,6 @@ def plot_retrieved_bd_only(
     nc_data: Dataset,
     source: Path,
     save_directory: Path,
-    version: str | None = None,
     figure_dpi: int = DFLT_RES,
     dark_mode: bool = False,
     south_inverted: bool = False,
@@ -1518,8 +1517,6 @@ def plot_retrieved_bd_only(
             and metadata.
         save_directory (Path): Root directory in which to save the generated
             plot files.
-        version (str | None, optional): Product version/revision string
-            included in the plot file name. Defaults to None.
         figure_dpi (int, optional): Resolution (DPI) at which to generate the
             plots. Defaults to DFLT_RES.
         dark_mode (bool, optional): Generate plots using 'dark mode' format.
@@ -1545,7 +1542,7 @@ def plot_retrieved_bd_only(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc_data.groups["Time"])
-    except Exception as exc:
+    except (ValueError, TypeError, RuntimeError) as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {source.as_posix()}")
@@ -1708,7 +1705,7 @@ def plot_retrieved_bd_only(
                 mem_dbd[mem_ndx][use_obs] - mem_cdd[mem_ndx][use_obs],
                 mem_dbd[mem_ndx][use_obs] + mem_cdd[mem_ndx][use_obs],
             )
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {source.as_posix()}")
@@ -1757,7 +1754,7 @@ def plot_retrieved_bd_only(
         # FIXME - kludge to use old L2 file - comment out line below
         try:
             mem_axs.set_ylim((b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng))
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {source.as_posix()}")
@@ -2329,6 +2326,8 @@ def l3_map(
     fig: plt.figure,
     hemisphere: str,
     MLT_sign: int,
+    b_sign_mod: int,
+    dBd_sign_mod: str,
     sun_geo_lon_mid: float,
     map_proj: ccrs.Projection,
     south_inverted: bool = False,
@@ -2387,13 +2386,10 @@ def l3_map(
     # boundary.
     if hemisphere == NORTH:
         ext_shift = 0.3 * (90 - latmid)
-        b_sign_mod = +1
     elif hemisphere == SOUTH:
         ext_shift = 0.3 * (-90 - latmid)
-        b_sign_mod = -1
     else:  # EEJ pass
         ext_shift = 0.0
-        b_sign_mod = +1
 
     x0_m, y0_m = map_proj.transform_point(
         lonmid, latmid + ext_shift, src_crs=DATA_TRANSFORM
@@ -2638,7 +2634,7 @@ def l3_map(
     cax = divider.append_axes("right", size="3%", pad=0.7, axes_class=maxes.Axes)
     cbar = fig.colorbar(sc, cax=cax)
     # cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
-    cbar.set_label("dB$_{{down}}$ [nT]")
+    cbar.set_label(f"{dBd_sign_mod}dB$_{{down}}$ [nT]")
 
 
 def plot_b_1D_maps_with_time(
@@ -2717,7 +2713,7 @@ def plot_b_1D_maps_with_time(
         l3_data = _load_l3_pass(nc_data)
     except TypeError:
         raise
-    except Exception as exc:
+    except (ValueError, RuntimeError) as exc:
         logger.error(f"Encountered exception while processing L3 file: {exc}")
         return
 
@@ -2774,6 +2770,9 @@ def plot_b_1D_maps_with_time(
     fig = plt.figure(num=prsd.time, figsize=(9.6, 8.0))
     l3_map_axs: GeoAxes = fig.add_subplot(1, 1, 1, projection=map_proj)
 
+    b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
+    dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
+
     l3_map(
         l3_map_axs=l3_map_axs,
         l3_data=l3_data,
@@ -2781,6 +2780,8 @@ def plot_b_1D_maps_with_time(
         fig=fig,
         hemisphere=hemisphere,
         MLT_sign=MLT_sign,
+        b_sign_mod=b_sign_mod,
+        dBd_sign_mod=dBd_sign_mod,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
@@ -2850,8 +2851,7 @@ def plot_retrieved_B_and_J(
     nc2_data: Dataset,
     nc2_sorc: Path,
     save_directory: Path,
-    version: str | None = None,
-    figure_dpi: int = DFLT_RES,
+    figure_dpi: int = 200,
     dark_mode: bool = False,
     south_inverted: bool = False,
     overwrite: bool = False,
@@ -2873,8 +2873,6 @@ def plot_retrieved_B_and_J(
             naming, metadata, and deriving the L3 source path.
         save_directory (Path): Root directory in which to save the generated
             plot files.
-        version (str | None, optional): Product version/revision string
-            included in the plot file name. Defaults to None.
         figure_dpi (int, optional): Resolution (DPI) at which to generate the
             plots. Defaults to DFLT_RES.
         dark_mode (bool, optional): Generate plots using 'dark mode' format.
@@ -2914,7 +2912,7 @@ def plot_retrieved_B_and_J(
     # if len(nc_data["Time/time_utc"]) == 0:
     try:
         time_utc, obs_date = get_datetime_from_utc_string(nc2_data.groups["Time"])
-    except Exception as exc:
+    except (ValueError, TypeError, RuntimeError) as exc:
         logger.error(f"Exception encountered: {exc}")
         logger.error("Processing skipped--truncated or corrupted data file?")
         logger.error(f"Problem file (datetime values): {nc2_sorc.as_posix()}")
@@ -3012,7 +3010,7 @@ def plot_retrieved_B_and_J(
             l3_data = _load_l3_pass(nc3_data)
         except TypeError:
             raise
-        except Exception as exc:
+        except (ValueError, RuntimeError) as exc:
             logger.error(f"Encountered exception while processing L3 file: {exc}")
             return
 
@@ -3089,6 +3087,9 @@ def plot_retrieved_B_and_J(
         colspan=mapcolspan,
     )  # ty:ignore[invalid-assignment]
 
+    b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
+    dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
+
     l3_map(
         l3_map_axs=l3_map_axs,
         l3_data=l3_data,
@@ -3096,6 +3097,8 @@ def plot_retrieved_B_and_J(
         fig=fig,
         hemisphere=hemisphere,
         MLT_sign=MLT_sign,
+        b_sign_mod=b_sign_mod,
+        dBd_sign_mod=dBd_sign_mod,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
@@ -3110,8 +3113,6 @@ def plot_retrieved_B_and_J(
         mag_label = "dB$_\\mathbf{{D}}$"
     else:
         mag_label = "d|B|"
-    b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
-    dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
     if hemisphere is not None:
         if show_b_value:
             mem_fp_desc = (
@@ -3237,7 +3238,7 @@ def plot_retrieved_B_and_J(
                 mem_dbd[mem_ndx][use_obs] - mem_err[mem_ndx][use_obs],
                 mem_dbd[mem_ndx][use_obs] + mem_err[mem_ndx][use_obs],
             )
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to save axis y range: {exc}")
             logger.error(f"Problem file (axis range): {nc2_sorc.as_posix()}")
@@ -3283,7 +3284,7 @@ def plot_retrieved_B_and_J(
         # FIXME - kludge to use old L2 file - comment out line below
         try:
             mem_axs.set_ylim((b_rng[0] - 0.05 * tot_rng, b_rng[1] + 0.05 * tot_rng))
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             mem_axs.set_ylim((-1.0, +1.0))
             logger.error(f"Exception while attempting to set axes y limits: {exc}")
             logger.error(f"Problem file (data range): {nc2_sorc.as_posix()}")
@@ -3563,7 +3564,7 @@ def ingest_full_day_all_sv(
                     else:
                         logger.error(f"{product} misidentified as L1-skipping")
                         date_dict[prsd.spcv][prsd.orbt] = None
-            except Exception as exc:
+            except (ValueError, TypeError, RuntimeError) as exc:
                 logger.error(f"Unrecoverable problem, skipping file: {exc}")
                 date_dict[prsd.spcv][prsd.orbt] = None
 
@@ -3583,7 +3584,7 @@ def ingest_full_day_all_sv(
                 try:
                     if orb_dict[dbvar] is not None:
                         full_day[full_key].extend(orb_dict[dbvar])
-                except Exception as exc:
+                except (ValueError, TypeError, RuntimeError) as exc:
                     logger.error(
                         f"Selected field could not be extracted from file: {exc}"
                     )

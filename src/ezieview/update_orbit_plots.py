@@ -65,7 +65,7 @@ def file_handler(
         with Dataset(each_file, mode="r") as nc_data:
             try:
                 nobs = nc_data.dimensions["ObsRate"].size
-            except Exception as exc:
+            except (ValueError, TypeError, RuntimeError) as exc:
                 logger.error(
                     f"Exception: {exc} obtaining ObsRate in file {each_file.as_posix()}"
                 )
@@ -118,7 +118,7 @@ def file_handler(
         # NOTE: L2 files are already segmented into individual science passes based
         # on the algorithm in split_on_science_segments(). No further distinction
         # needs to be made.
-        version = f"{prsd.vrsn}_{prsd.rvsn}"
+        # version = f"{prsd.vrsn}_{prsd.rvsn}"
 
         try:
             nc_data = Dataset(each_file, mode="r")
@@ -140,7 +140,7 @@ def file_handler(
                     nc_data=nc_data,
                     source=each_file,
                     save_directory=out_dir_path,
-                    version=version,
+                    # version=version,
                     south_inverted=True,  # Use heliospheric community mapping style
                     overwrite=overwrite,
                     figure_dpi=figure_dpi,
@@ -152,7 +152,7 @@ def file_handler(
                     nc2_data=nc_data,
                     nc2_sorc=each_file,
                     save_directory=out_dir_path,
-                    version=version,
+                    # version=version,
                     south_inverted=True,  # Use heliospheric community mapping style
                     overwrite=overwrite,
                     figure_dpi=figure_dpi,
@@ -176,13 +176,13 @@ def file_handler(
                     git_branch = str(data["Configuration/git_branch"][:])
                     git_commit = str(data["Configuration/git_hash"][:])
                 break
-            except Exception as exc:
+            except (ValueError, TypeError, RuntimeError) as exc:
                 logger.warning(f"Unable to get git branch/commit from {src}: {exc}")
 
         with Dataset(each_file, mode="r") as nc_data:
             try:
                 nobs = nc_data["l2_data/time_utc"].size
-            except Exception as exc:
+            except (ValueError, TypeError, RuntimeError) as exc:
                 logger.error(
                     f"Exception: {exc} field (time_utc) missing in "
                     f"file {each_file.as_posix()}"

@@ -50,7 +50,7 @@ EZIE_DATE_FORMAT = "%Y%m%d"  # Date format used in EZIE product filenames
 # ===== Plot generation parameters ====================================================
 DEFAULT_FIG_SIZE = (16, 10)  # Landscape
 ALTERNATE_FIG_SIZE = (16, 7)  # Short Landscape
-DFLT_RES = 100  # DPI
+DFLT_RES = 200  # DPI
 
 TERMINATOR_ALPHA = 0.25
 TERMINATOR_COLOR = "#000044"
