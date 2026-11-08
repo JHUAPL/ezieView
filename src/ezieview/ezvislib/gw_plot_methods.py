@@ -2531,7 +2531,9 @@ def l3_map(
     m_stride = 5  # Overlay current arrows (quiver plot) every m_stride positions
     J = np.sqrt(Je**2 + Jn**2)
     Jmax = 10 * np.nanmax(J)  # scales the LENGTH of the quiver arrows
-    qwid = 0.001  # scales the WIDTH of the quiver arrow(head?)s
+    logger.debug(f"Jmax (A/m) = {1e-9 * Jmax:.2e}")
+    Jmax = 4.0e9  # nA/m
+    qwid = 0.0015  # scales the WIDTH of the quiver arrow(head?)s
     b_mrk_sz = 20  # Marker size used for observed and modeled B scatter plots
 
     if dark_mode:
@@ -2570,7 +2572,7 @@ def l3_map(
     obs_bmag_smooth = smooth_along_track(model_B, window=5)
 
     sc = l3_map_axs.pcolormesh(
-        lon_mesh,
+        b_sign_mod * lon_mesh,
         lat_mesh,
         b_sign_mod * obs_bmag_smooth,
         cmap=cmap,
@@ -2581,7 +2583,7 @@ def l3_map(
     )
 
     # Retrieved J
-    l3_map_axs.quiver(
+    q = l3_map_axs.quiver(
         MLT_sign * lon_mesh[::m_stride, ::m_stride].flatten(),
         lat_mesh[::m_stride, ::m_stride].flatten(),
         MLT_sign * Je[::m_stride, ::m_stride].flatten(),
@@ -2590,6 +2592,17 @@ def l3_map(
         width=qwid,
         color="xkcd:black" if not dark_mode else "orange",
         transform=DATA_TRANSFORM,
+    )
+    u_quiv = 0.2e9  # Assuming L# file units are nA/m. TBD
+    l3_map_axs.quiverkey(
+        q,
+        X=1.2,
+        Y=1.1,
+        U=u_quiv,
+        label=f"|J|, {1e-9 * u_quiv:.1f} A/m",
+        labelpos="S",
+        labelcolor="xkcd:black" if not dark_mode else "orange",
+        coordinates="axes",
     )
 
     # Observed (L2) B
@@ -2770,7 +2783,7 @@ def plot_b_1D_maps_with_time(
         MLT_sign=MLT_sign,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
-        south_inverted=False,
+        south_inverted=True,
         dark_mode=dark_mode,
         stretch=0.035,
         show_b_value=show_b_value,
@@ -2919,12 +2932,9 @@ def plot_retrieved_B_and_J(
         )
         return
 
-    # FIXME: Attempt to trim slewing observations at start and finish
-    # if len(time_utc) > 12:
-    #     use_obs = np.s_[5:-5]
-    # else:
-    #     use_obs = np.s_[:]
-    use_obs = np.s_[:]  # See how things look without the haircut now
+    # Slewing observations are trimmed by PRIZM now, no longer any need to do it here.
+    # Use the entire slice.
+    use_obs = np.s_[:]
 
     # Define smoothing parameters for curve to be overlain on (noisy) dB plots.
     num_tim = len(time_utc[use_obs])
@@ -3088,7 +3098,7 @@ def plot_retrieved_B_and_J(
         MLT_sign=MLT_sign,
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
-        south_inverted=False,
+        south_inverted=True,
         dark_mode=dark_mode,
         stretch=0.06,
         show_b_value=show_b_value,
@@ -3100,6 +3110,8 @@ def plot_retrieved_B_and_J(
         mag_label = "dB$_\\mathbf{{D}}$"
     else:
         mag_label = "d|B|"
+    b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
+    dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
     if hemisphere is not None:
         if show_b_value:
             mem_fp_desc = (
@@ -3121,7 +3133,7 @@ def plot_retrieved_B_and_J(
 
     subtitle2 = f"""The MEM d|B| data plotted at left is sampled at a 2 second cadence.
     The {fpclr} lines are the running average of {AVERAGING_WINDOW} samples. The magenta
-    lines show the modeled dB$_{{down}}$ values sampled along each MEM
+    lines show modeled {dBd_sign_mod}dB$_{{down}}$ values sampled along each MEM
     footprint."""
 
     fig.text(
@@ -3212,7 +3224,7 @@ def plot_retrieved_B_and_J(
         sample_pts = mem_nearest(lons[mem_ndx, use_obs], lats[mem_ndx, use_obs])
         mem_axs.plot(
             time_utc[use_obs],
-            [model_B[x, y] for x, y in sample_pts],
+            [b_sign_mod * model_B[x, y] for x, y in sample_pts],
             color="magenta",
             linestyle="solid",
             lw=1.0,
