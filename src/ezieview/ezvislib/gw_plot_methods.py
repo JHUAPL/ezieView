@@ -2524,13 +2524,28 @@ def l3_map(
         )  # Magnetic drift equator
 
     # Now we can finally draw the J and B values! Define some plotting parameters.
-    m_stride = 5  # Overlay current arrows (quiver plot) every m_stride positions
-    J = np.sqrt(Je**2 + Jn**2)
-    Jmax = 10 * np.nanmax(J)  # scales the LENGTH of the quiver arrows
-    logger.debug(f"Jmax (A/m) = {1e-9 * Jmax:.2e}")
-    Jmax = 4.0e9  # nA/m
-    qwid = 0.0015  # scales the WIDTH of the quiver arrow(head?)s
     b_mrk_sz = 20  # Marker size used for observed and modeled B scatter plots
+    m_stride = 5  # Overlay current arrows (quiver plot) every m_stride positions
+    j_scale_fac = 1e-9  # L3 files originally contained nA/m, rescale to A/m => 1e-9
+    J = np.sqrt(Je**2 + Jn**2)
+    Jmax = np.nanmax(J) * j_scale_fac  # converted to A/m for older L3 outputs in nA/m
+    logger.debug(f"Jmax (A/m) = {Jmax:.2e}")
+    # - qmax scales the LENGTH of the quiver arrows
+    #       Scales the length of the arrow inversely. Number of data values represented
+    #       by one unit of arrow length on the plot. For example, if the data represents
+    #       velocity in meters per second (m/s), the scale parameter determines how many
+    #       meters per second correspond to one unit of arrow length relative to the
+    #       width of the plot. Smaller scale parameter makes the arrow longer. By
+    #       default, an autoscaling algorithm is used to scale the arrow length to a
+    #       reasonable size, which is based on the average vector length and the number
+    #       of vectors.
+    # - qwid scales the WIDTH  of the quiver arrow(head?)s
+    #       Shaft width in arrow units. All head parameters are relative to width.
+    # - u_quiv sets the magnitude of the quiver arrow+text displayed in the "quiver key"
+    qmax = 10.0 / j_scale_fac * Jmax  # autoscaling based on data range
+    qmax = 10.0 / j_scale_fac  # fixed/constant scaling
+    qwid = 0.0015
+    u_quiv = 0.5 / j_scale_fac  # = 0.5 A/m at present
 
     if dark_mode:
         color_min = "#4203ff"
@@ -2578,27 +2593,17 @@ def l3_map(
         transform=DATA_TRANSFORM,
     )
 
-    # Retrieved J
+    # Retrieved J. First four positional-only args to quiver are X,Y,U,V.
+    # Currently only X and U need to be tweaked for looking-down-through-earth SH plots
     q = l3_map_axs.quiver(
         MLT_sign * lon_mesh[::m_stride, ::m_stride].flatten(),
         lat_mesh[::m_stride, ::m_stride].flatten(),
         MLT_sign * Je[::m_stride, ::m_stride].flatten(),
         Jn[::m_stride, ::m_stride].flatten(),
-        scale=Jmax,
+        scale=qmax,
         width=qwid,
         color="xkcd:black" if not dark_mode else "orange",
         transform=DATA_TRANSFORM,
-    )
-    u_quiv = 0.2e9  # Assuming L# file units are nA/m. TBD
-    l3_map_axs.quiverkey(
-        q,
-        X=1.2,
-        Y=1.1,
-        U=u_quiv,
-        label=f"|J|, {1e-9 * u_quiv:.1f} A/m",
-        labelpos="S",
-        labelcolor="xkcd:black" if not dark_mode else "orange",
-        coordinates="axes",
     )
 
     # Observed (L2) B
@@ -2635,6 +2640,30 @@ def l3_map(
     cbar = fig.colorbar(sc, cax=cax)
     # cbar.set_label(f"B$_{{{algorithm}}}$ [nT]")
     cbar.set_label(f"{dBd_sign_mod}dB$_{{down}}$ [nT]")
+
+    # # Colorbar-axis bounding box, in figure-normalized coordinates.
+    # fig.canvas.draw()
+    # bbox = cbar.ax.get_position()
+    # # Center of the colorbar axis in figure-normalized coordinates.
+    # center_fig = (
+    #     (bbox.x0 + bbox.x1) / 2,
+    #     (bbox.y0 + bbox.y1) / 2,
+    # )
+    # # Convert figure coordinates -> display coordinates -> l3_map_axs axes coordinates.
+    # center_display = fig.transFigure.transform(center_fig)
+    # center_in_l3_axes = l3_map_axs.transAxes.inverted().transform(center_display)
+    # logger.info(f"{center_in_l3_axes!s}")
+
+    l3_map_axs.quiverkey(
+        q,
+        X=1.25,
+        Y=1.1,
+        U=u_quiv,
+        label=f"|J|, {u_quiv * j_scale_fac:.1f} A/m",
+        labelpos="S",
+        labelcolor="xkcd:black" if not dark_mode else "orange",
+        coordinates="axes",
+    )
 
 
 def plot_b_1D_maps_with_time(
