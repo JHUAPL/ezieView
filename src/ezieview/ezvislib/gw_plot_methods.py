@@ -2330,6 +2330,7 @@ def l3_map(
     dBd_sign_mod: str,
     sun_geo_lon_mid: float,
     map_proj: ccrs.Projection,
+    j_scale_fac: float = 1e-9,
     south_inverted: bool = False,
     dark_mode: bool = False,
     show_b_value: bool = False,
@@ -2347,6 +2348,8 @@ def l3_map(
         MLT_sign (int): MLT sign multiplier (+1, or -1 for south-inverted).
         sun_geo_lon_mid (float): Subsolar geodetic longitude (degrees) at the
             pass midpoint.
+        j_scale_fac: L3 files originally (v002 and previous) contained values in nA/m,
+            rescale to A/m => 1e-9. v003 and later files should use j_scale_fac = 1.0
         map_proj (ccrs.Projection): Cartopy projection of the map axes.
         south_inverted (bool, optional): Invert the southern hemisphere MLT
             axis (heliospheric community mapping style). Defaults to False.
@@ -2526,7 +2529,6 @@ def l3_map(
     # Now we can finally draw the J and B values! Define some plotting parameters.
     b_mrk_sz = 20  # Marker size used for observed and modeled B scatter plots
     m_stride = 5  # Overlay current arrows (quiver plot) every m_stride positions
-    j_scale_fac = 1e-9  # L3 files originally contained nA/m, rescale to A/m => 1e-9
     J = np.sqrt(Je**2 + Jn**2)
     Jmax = np.nanmax(J) * j_scale_fac  # converted to A/m for older L3 outputs in nA/m
     logger.debug(f"Jmax (A/m) = {Jmax:.2e}")
@@ -2814,6 +2816,7 @@ def plot_b_1D_maps_with_time(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
+        j_scale_fac=1.0 if prsd.vrsn >= "v003" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.035,
         show_b_value=show_b_value,
@@ -3061,6 +3064,7 @@ def plot_retrieved_B_and_J(
                 f"L3 file appears to contain EEJ pass, skipping: {nc3_sorc.as_posix()}"
             )
             return
+    prsd = parse_ezie_product_name(source=nc3_sorc)
 
     if l3_data.algorithm is not None:
         algorithm = l3_data.algorithm
@@ -3131,6 +3135,7 @@ def plot_retrieved_B_and_J(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
+        j_scale_fac=1.0 if prsd.vrsn >= "v003" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.06,
         show_b_value=show_b_value,
