@@ -364,6 +364,8 @@ def main(
             parse_ezie_product_name(f).spcv,
         )
     )
+    for kept in keep_files:
+        logger.debug(f"File: {kept.stem}")
 
     # Create output directory for storage of plot files if it does not already exist
     out_dir_path = Path(plots_directory)

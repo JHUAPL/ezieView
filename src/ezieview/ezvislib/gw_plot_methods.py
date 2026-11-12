@@ -2531,7 +2531,7 @@ def l3_map(
     m_stride = 5  # Overlay current arrows (quiver plot) every m_stride positions
     J = np.sqrt(Je**2 + Jn**2)
     Jmax = np.nanmax(J) * j_scale_fac  # converted to A/m for older L3 outputs in nA/m
-    logger.debug(f"Jmax (A/m) = {Jmax:.2e}")
+    logger.debug(f"Jmax (A/m) = {Jmax:6.2e}  J scale factor = {j_scale_fac:.1e}")
     # - qmax scales the LENGTH of the quiver arrows
     #       Scales the length of the arrow inversely. Number of data values represented
     #       by one unit of arrow length on the plot. For example, if the data represents
@@ -2804,6 +2804,7 @@ def plot_b_1D_maps_with_time(
     b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
     dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
 
+    logger.debug(f"Version: {prsd.vrsn}")
     l3_map(
         l3_map_axs=l3_map_axs,
         l3_data=l3_data,
@@ -2816,7 +2817,7 @@ def plot_b_1D_maps_with_time(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
-        j_scale_fac=1.0 if prsd.vrsn >= "v003" else 1.0e-9,
+        j_scale_fac=1.0 if prsd.vrsn >= "003" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.035,
         show_b_value=show_b_value,
@@ -3123,6 +3124,7 @@ def plot_retrieved_B_and_J(
     b_sign_mod = -1 if hemisphere == SOUTH else +1  # sign of dB_down flips
     dBd_sign_mod = "-" if hemisphere == SOUTH else "+"  # sign of dB_down flips
 
+    logger.debug(f"Version: {prsd.vrsn}")
     l3_map(
         l3_map_axs=l3_map_axs,
         l3_data=l3_data,
@@ -3135,7 +3137,7 @@ def plot_retrieved_B_and_J(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
-        j_scale_fac=1.0 if prsd.vrsn >= "v003" else 1.0e-9,
+        j_scale_fac=1.0 if prsd.vrsn >= "003" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.06,
         show_b_value=show_b_value,
