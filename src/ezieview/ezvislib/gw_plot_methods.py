@@ -65,6 +65,7 @@ from ezieview.ezvislib.gw_plot_params import (
 from ezieview.ezvislib.gw_plot_utils import (
     add_pipeline_metadata,
     add_product_metadata,
+    filter_files_by_version,
     get_datetime_from_utc_string,
     map_inverted_continents,
     map_magnetic_continents,
@@ -216,12 +217,23 @@ def _l3_source_from_l2(l2_sorc: Path) -> Path:
     replacing the product-level token in the file name (not any "l2"
     substring in directory names).
     """
-    # parts = l2_sorc.name.split("_")
-    # if len(parts) >= 2 and parts[1].lower() == "l2":
-    #     parts[1] = "l3"
-    #     return l2_sorc.with_name("_".join(parts))
-    # Fallback for nonstandard names: legacy full-path substitution.
-    return Path(l2_sorc.as_posix().replace("l2", "l3"))
+    # Full-path l2->l3 substitution. This file may not exist, but provides the desired
+    # search pattern to look for alternate versions and revisions.
+    nc3_sorc = Path(l2_sorc.as_posix().replace("l2", "l3"))
+    prsd = parse_ezie_product_name(nc3_sorc)
+    # FIXME: file_pattern is FRAGILE - will break if version/revsion format changes!
+    # Switch to slightly more robust regex instead?
+    candidates = filter_files_by_version(
+        file_directory=nc3_sorc.parent,
+        file_pattern=f"{nc3_sorc.stem[:-9]}*.nc4",
+        start_date=prsd.dttm,
+        stop_date=prsd.dttm,
+        remove_near_dupes=True,
+    )
+    nc3_sorc = None
+    if len(candidates) >= 1:
+        nc3_sorc = candidates[0]
+    return nc3_sorc
 
 
 def _apply_dark_mode(dark_mode: bool) -> None:
@@ -2595,6 +2607,16 @@ def l3_map(
         transform=DATA_TRANSFORM,
     )
 
+    # sc = l3_map_axs.contourf(
+    #     b_sign_mod * lon_mesh,
+    #     lat_mesh,
+    #     b_sign_mod * obs_bmag_smooth,
+    #     cmap=cmap,
+    #     vmin=-CB_B_AMP,
+    #     vmax=+CB_B_AMP,
+    #     transform=DATA_TRANSFORM,
+    # )
+
     # Retrieved J. First four positional-only args to quiver are X,Y,U,V.
     # Currently only X and U need to be tweaked for looking-down-through-earth SH plots
     q = l3_map_axs.quiver(
@@ -2817,7 +2839,7 @@ def plot_b_1D_maps_with_time(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
-        j_scale_fac=1.0 if prsd.vrsn >= "003" else 1.0e-9,
+        j_scale_fac=1.0 if prsd.vrsn >= "003" and prsd.rvsn >= "001" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.035,
         show_b_value=show_b_value,
@@ -2930,9 +2952,9 @@ def plot_retrieved_B_and_J(
     #     Defaults to "Uncorrected".
 
     nc3_sorc: Path = _l3_source_from_l2(nc2_sorc)
-    if not nc3_sorc.exists():
+    if nc3_sorc is None:
         logger.error(
-            f"L3 corresponding to supplied L2 absent, skipping: {nc3_sorc.as_posix()}"
+            f"Unable to find acceptable L3 counterpart for L2: {nc2_sorc.as_posix()}"
         )
         return
 
@@ -3137,7 +3159,7 @@ def plot_retrieved_B_and_J(
         sun_geo_lon_mid=sun_geo_lon_mid,
         map_proj=map_proj,
         south_inverted=True,
-        j_scale_fac=1.0 if prsd.vrsn >= "003" else 1.0e-9,
+        j_scale_fac=1.0 if prsd.vrsn >= "003" and prsd.rvsn >= "001" else 1.0e-9,
         dark_mode=dark_mode,
         stretch=0.06,
         show_b_value=show_b_value,

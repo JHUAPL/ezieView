@@ -75,7 +75,7 @@ def spice_kernel_mgr() -> tuple[Path, Path, Path]:
         if not kernel_path.exists():
             logger.info(f"Downloading and caching {subdir.upper()} file...")
             _download_kernel(url, kernel_path)
-        logger.info(f"Using {subdir.upper()} file {kernel_path.as_posix()}")
+        logger.debug(f"Using {subdir.upper()} file {kernel_path.as_posix()}")
         paths.append(kernel_path)
 
     return paths[0], paths[1], paths[2]
