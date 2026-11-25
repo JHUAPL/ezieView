@@ -231,7 +231,7 @@ def _l3_source_from_l2(l2_sorc: Path) -> Path:
         remove_near_dupes=True,
     )
     nc3_sorc = None
-    if len(candidates) >= 1:
+    if candidates is not None and len(candidates) >= 1:
         nc3_sorc = candidates[0]
     return nc3_sorc
 
